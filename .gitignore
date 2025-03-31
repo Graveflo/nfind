@@ -1,0 +1,12 @@
+**/scratch.nim
+**/*.bin
+**/*.a
+**/*.so
+**/*.o
+**/*.lib
+**/*.dll
+**/*.sys
+**/*.exe
+**/profile_results.txt
+**/bin/**
+**/deps/**
