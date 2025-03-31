@@ -1,4 +1,4 @@
-import std/[strformat, strutils, os]
+import std/[strutils, os]
 
 type
   GlobFilter* = object
@@ -205,7 +205,6 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
         norm()
     of '}':
       if state.match == InDisjoint:
-        #inc gt
         state.gt = gt + 1
         state.match = Match
         state.pt = pt
@@ -235,7 +234,7 @@ proc invert(k: MatchKind): MatchKind =
   of AllFurtherMatch: NoFurtherMatch
 
 proc findFirstGlob*(
-    path: string; filters: seq[GlobFilter]; states: var seq[GlobState]
+    path: string; filters: openArray[GlobFilter]; states: var seq[GlobState]
 ): int =
   result = -1
   for i in 0 ..< states.len:
@@ -253,7 +252,7 @@ proc findFirstGlob*(
         result = i
         break
 
-proc findFirstGlob*(path: string; filters: seq[GlobFilter]): int =
+proc findFirstGlob*(path: string; filters: openArray[GlobFilter]): int =
   for i in 0 ..< filters.len:
     var state = GlobState()
     matchGlob(path, filters[i].glob, state)

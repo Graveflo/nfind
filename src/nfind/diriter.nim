@@ -138,22 +138,23 @@ proc close*(it: DirIter) =
 const skips = [".", ".."]
 export FsoKind
 iterator find*(
-    path: string; acceptTypes: set[FsoKind]; filtersl: seq[GlobFilter]
+    path: string; acceptTypes: set[FsoKind]; filtersl: openArray[GlobFilter]
 ): string =
   bind skips
   var working = path
   if working.len > 0 and working[^1] == DirSep:
     working.setLen(working.len - 1)
-  var filters = newSeqOfCap[GlobFilter](filtersl.len)
-  var wgs = newSeqofCap[GlobState](filtersl.len)
+  let addingInclAll = not filtersl.anyIt(it.incl)
+  var filters = newSeqOfCap[GlobFilter](filtersl.len + ord(addingInclAll))
+  var wgs = newSeqofCap[GlobState](filters.len)
   for filter in filtersl:
-    wgs.add GlobState(pt: len(working))
+    wgs.add GlobState(pt: len(working) + 1)
     filters.add filter
-  if not filters.anyIt(it.incl):
+  if addingInclAll:
     filters.add GlobFilter(incl: true, glob: "**")
+    wgs.add GlobState(pt: len(working))
   # absolute path so there is no nonsense from the os APIs
-  var dirc = @[(openDirIter(path.absolutePath), filters.mapIt(GlobState()))]
-
+  var dirc = @[(openDirIter(path.absolutePath), wgs)]
   try:
     if isValid(dirc[^1][0]):
       while true:

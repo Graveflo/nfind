@@ -76,15 +76,15 @@ proc main(): int =
     syntax:
       nfind (path ..) (-i:glob ..) (-e:glob ..) (--exec:cmd ..) (-t:filetypes) (--help[:glob,:exec,:flags])
     
-    - multiple paths can be specified as bare arguments
+    - multiple paths can be specified as positional arguments
     - if no paths are specified '.' is implied
     - if no inclusion filters are specified "**" is implied as the least priority filter
     - glob filters are evaluated in the order they are specified
-      -- see '--help:glob'
+      - see '--help:glob'
     - file types are given all in one ex: -t:File,Dir,Link
     - exec specifies a command to run as a filter for each file passing the glob filters
-      -- the exit status of the command determines filter's acceptance
-      -- see '--help:exec'
+      - the exit status of the command determines filter's acceptance
+      - see '--help:exec'
     - use '--e!' and '--i!' for inverted filters
 
     version: {version} 
