@@ -189,8 +189,10 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
             discard
           inc gt
         if gt >= len(glob):
-          if gs.pt < pathLen:
+          if gs.pt < pathLen or gs.match == NoMatch:
             gs.match = NoMatch
+            if retc > -1:
+              continue
           break
 
       state.match = gs.match
@@ -259,3 +261,9 @@ proc findFirstGlob*(path: string; filters: openArray[GlobFilter]): int =
     if state.match >= Match:
       return i
   return -1
+
+proc includes*(filters: openArray[GlobFilter]; path: string): bool =
+  result = false
+  let pos = findFirstGlob(path, filters)
+  if pos > -1:
+    result = filters[pos].incl

@@ -233,6 +233,7 @@ suite "File searching":
     testMatch "{,a}{ab,b}cde", "abcde"
     testMatch "{,a}{a{bcd,b{c}}}cde", "abcde"
     testGlob "{}{a{bcd,b{c}}}cde", "abcde", Match
+    testMatch "{*.nim,*.nims}", "config.nims"
 
   test "cmplx disjoint":
     #template testGroups(glob, matches: untyped) =

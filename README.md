@@ -15,10 +15,25 @@ for path in find(".", {fsoFile}, filters):
   echo path
 ```
 
-lists every file in pwd that does not have a nim extension.
+lists every file in pwd that does not have a nim extension. Globs are always
+relative to the seach path for simplicity.
 
-that's pretty much it.. The glob logic is designed to be efficient for walking
-directories.
+```nim
+echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
+```
+
+
+## why use
+* glob logic is designed to be efficient for walking directories
+ * `GlobState` objects track progress of each pattern as the path gains depth
+* hand rolled - no regex, no non-`std` dependencies
+* fairly robust features (eg. nested expressions in groups)
+ * see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing  
+* compatible with windows and posix paths
+
+## why not use
+* new; could be missing some test cases
+* although tested on windows the win API code could probably be better
 
 ## nfind program
 
