@@ -26,6 +26,11 @@ With the library is an implementation of a find utility. I made it because I alw
 syntax for unix find. It's a simple example of how to use the library. Below are the help menus
 for the program.
 
+build with:
+```bash
+nim -d:danger buildNFind
+```
+
 ```
 syntax:
   nfind (path ..) (-i:glob ..) (-e:glob ..) (--exec:cmd ..) (-t:filetypes) (--help[:glob,:exec,:flags])

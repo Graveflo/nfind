@@ -1,5 +1,7 @@
 import std/[strformat, strutils, os, compilesettings]
 
+switch("path", "src")
+
 let projectPath = when defined(mingw):
     getCurrentDir().parentDir().replace("\\", "/")
   else:
@@ -30,5 +32,5 @@ proc doBuild(src: string, cmdln: seq[string] = @[]) =
 
 
 task buildNFind, "builds nfind":
-  doBuild("src/nfind.nim", @["--stacktrace:off", "--mm:arc", "--threads:off"])
+  doBuild("nfind.nim", @["--stacktrace:off", "--mm:arc", "--threads:off"])
 
