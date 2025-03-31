@@ -18,7 +18,7 @@ when defined(windows):
 
 when defined(posix):
   import std/posix
-  
+
   proc maybeOsError*() =
     if errno != 0:
       raise newOsError(osLastError())

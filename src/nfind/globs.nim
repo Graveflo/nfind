@@ -157,7 +157,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
           pt = gs.pt
           if gs.gt == gt:
             break
-        
+
         if retc > -1:
           if gs.match < Match:
             gt = retc
@@ -165,7 +165,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
             retc = -1
           else:
             gt = gs.gt - 1
-        
+
         var depth = 1
         while gt < len(glob):
           case glob[gt]
@@ -192,7 +192,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
           if gs.pt < pathLen:
             gs.match = NoMatch
           break
-        
+
       state.match = gs.match
       return
     of ',':

@@ -5,10 +5,11 @@ example usage:
 ```nim
 import nfind/diriter
 
-let filters = @[
-  GlobFilter(incl: false, glob: "*/*/**"),
-  GlobFilter(incl: true, glob: "*.{nim,nims}", inverted: true)
-]
+let filters =
+  @[
+    GlobFilter(incl: false, glob: "*/*/**"),
+    GlobFilter(incl: true, glob: "*.{nim,nims}", inverted: true),
+  ]
 
 for path in find(".", {fsoFile}, filters):
   echo path
@@ -19,7 +20,7 @@ lists every file in pwd that does not have a nim extension.
 that's pretty much it.. The glob logic is designed to be efficient for walking
 directories.
 
-## NFind program
+## nfind program
 
 With the library is an implementation of a find utility. I made it because I always forget the
 syntax for unix find. It's a simple example of how to use the library. Below are the help menus

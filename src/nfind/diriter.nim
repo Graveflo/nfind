@@ -135,7 +135,6 @@ proc close*(it: DirIter) =
   else:
     discard closedir(it)
 
-
 const skips = [".", ".."]
 export FsoKind
 iterator find*(

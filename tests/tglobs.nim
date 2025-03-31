@@ -1,14 +1,14 @@
 import std/[unittest]
 import nfind/globs
 
-template testMatches(glob:string, matches: untyped) =
+template testMatches(glob: string; matches: untyped) =
   for x in matches:
     check matchGlob(x, glob).match == Match
 
-template testMatch(glob:string, x: untyped) =
+template testMatch(glob: string; x: untyped) =
   check matchGlob(x, glob).match == Match
 
-template testGlob(glob:string, x: untyped, mk:MatchKind) =
+template testGlob(glob: string; x: untyped; mk: MatchKind) =
   check matchGlob(x, glob).match == mk
 
 suite "File searching":
@@ -233,7 +233,7 @@ suite "File searching":
     testMatch "{,a}{ab,b}cde", "abcde"
     testMatch "{,a}{a{bcd,b{c}}}cde", "abcde"
     testGlob "{}{a{bcd,b{c}}}cde", "abcde", Match
-  
+
   test "cmplx disjoint":
     #template testGroups(glob, matches: untyped) =
     #  let r = expandAllGlobGroups(glob)
