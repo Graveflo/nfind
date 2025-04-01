@@ -21,140 +21,63 @@ suite "File searching":
     check r.match >= Match
 
   test "norm":
-    block:
-      let r = matchGlob("a", "b")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("b", "b")
-      check r.match == Match
-    block:
-      let r = matchGlob("bb", "b")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("bb", "bb")
-      check r.match == Match
+    testMatch "b", "b"
+    testMatch "bb", "bb"
+    testGlob "b", "a", NoFurtherMatch
+    testGlob "b", "bb", NoFurtherMatch
 
   test "special":
-    block:
-      let r = matchGlob("./thing", "thing")
-      check r.match == Match
-    block:
-      let r = matchGlob("deps", "deps/**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("./deps", "deps/**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("./ns", "./ns/**")
-      check r.match == AllFurtherMatch
+    testMatch "thing", "./thing"
+    testGlob "deps/**", "deps", AllFurtherMatch
+    testGlob "deps/**", "./deps", AllFurtherMatch
+    testGlob "./ns/**", "./ns", AllFurtherMatch
 
   test "star":
-    block:
-      let r = matchGlob("a", "*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b", "*/?")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/c", "*/b/*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/c", "a/*/c")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/c", "a/*/*/c")
-      check r.match == NoMatch
-    block:
-      let r = matchGlob("a/b/c/d", "a/*/*/c")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("a/b/c/d/eb/fb", "*/*/*/*/*/fb")
-      check r.match == Match
-    block:
-      let r = matchGlob("fb", "*b")
-      check r.match == Match
-    block:
-      let r = matchGlob("hfb", "*b")
-      check r.match == Match
-    block:
-      let r = matchGlob("hfb", "b*")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("bf", "b*")
-      check r.match == Match
-    block:
-      let r = matchGlob("vbf", "b*")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("vbf", "*")
-      check r.match == Match
-    block:
-      let r = matchGlob("vbf", "*a")
-      check r.match == NoFurtherMatch
+    testMatch "*", "a"
+    testMatch "*/?", "a/b"
+    testMatch "*/b/*", "a/b/c"
+    testMatch "a/*/c", "a/b/c"
+    testMatch "*/*/*/*/*/fb", "a/b/c/d/eb/fb"
+    testMatch "*b", "fb"
+    testMatch "*b", "b"
+    testMatch "b*", "bf"
+    testMatch "*", "vbf"
+
+    testGlob "b*", "hfb", NoFurtherMatch
+    testGlob "a/*/*/c", "a/b/c", NoMatch
+    testGlob "a/b/*/*/b", "a/b/c", NoMatch
+    testGlob "a/b/*/*", "a/b/c", NoMatch
+    testGlob "a/b/*/*", "a/b/c/", NoMatch
+    testGlob "a/*/*/c", "a/b/c/d", NoFurtherMatch
+    testGlob "b*", "vbf", NoFurtherMatch
+    testGlob "*a", "vbf", NoFurtherMatch
 
   test "star ext":
-    block:
-      let r = matchGlob("some.thing", "*.*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/soming", "a/*/so*g")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/somingn", "a/*/so*g")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("a/b/aba", "**/*b*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/abba", "**/*b*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/abb", "**/*b*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/acb", "**/*b*")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/abc", "**/*abc")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/asbbc th.efg", "**/*b*.efg")
-      check r.match == Match
-    block:
-      let r = matchGlob("a/b/asjbc th.efg", "**/*jbc*.e*")
-      check r.match == Match
+    testMatch "*.*", "some.thing"
+    testMatch "a/*/so*g", "a/b/soming"
+    testMatch "**/*b*", "a/b/aba"
+    testMatch "**/*b*", "a/b/abba"
+    testMatch "**/*b*", "a/b/abb"
+    testMatch "**/*b*", "a/b/acb"
+    testMatch "**/*abc", "a/b/abc"
+    testMatch "**/*b*.efg", "a/b/asbbc th.efg"
+    testMatch "**/*jbc*.e*", "a/b/asjbc th.efg"
+    testGlob "a/b/**/**/b", "a/b/c", NoMatch
+    testGlob "a/b/**/c/**/b", "a/b/c", NoMatch
+    testMatch "a/b/**/c/**/b", "a/b/c/b"
+    testGlob "a/*/so*g", "a/b/somingn", NoFurtherMatch
 
   test "starstar":
-    block:
-      let r = matchGlob("a", "**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("aa", "**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("aa/aa", "**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("aa/aa/aaab", "**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("aa/som/x/a/som/thing", "**/som/thing")
-      check r.match == Match
-    block:
-      let r = matchGlob("aa/som/x/a/som/thing", "**/som/**/som/thing")
-      check r.match == Match
-    block:
-      let r = matchGlob("aa/som/x/a/som/thin/som/thing", "**/som/**/som/thing")
-      check r.match == Match
-    block:
-      let r = matchGlob("aa/som/x/a/som/thin/som/thin", "**/som/**/som/thing")
-      check r.match == NoMatch
-    block:
-      let r = matchGlob("aa/som/x/a/som/thin/som/thing", "*/som/**/som/thing")
-      check r.match == Match
-    block:
-      let r = matchGlob("./handlers/something.lua", "./handlers/**/*.lua")
-      check r.match == Match
+    testMatch "**/som/**/som/thing", "aa/som/x/a/som/thing"
+    testMatch "**/som/**/som/thing", "aa/som/x/a/som/thin/som/thing"
+    testMatch "**/som/thing", "aa/som/x/a/som/thing"
+    testMatch "*/som/**/som/thing", "aa/som/x/a/som/thin/som/thing"
+    testMatch "./handlers/**/*.lua", "./handlers/something.lua"
+    testGlob "**", "a", AllFurtherMatch
+    testGlob "**", "aa", AllFurtherMatch
+    testGlob "**", "aa/aa", AllFurtherMatch
+    testGlob "**", "aa/aa/aaab", AllFurtherMatch
+    testGlob "**/som/**/som/thing", "aa/som/x/a/som/thin/som/thin", NoMatch
 
   test "incremental **":
     var gs = @[GlobState()]
@@ -169,43 +92,24 @@ suite "File searching":
     check gs[0].match == Match
 
   test "startstar before and after":
-    block:
-      let r = matchGlob("aa/aa/aaab", "**/aa/**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("aa/ab/aaab", "**/aa/**")
-      check r.match == AllFurtherMatch
-    block:
-      let r = matchGlob("a/ab/aaab", "**/aa/**")
-      check r.match == NoMatch
+    testGlob "**/aa/**", "aa/aa/aaab", AllFurtherMatch
+    testGlob "**/aa/**", "aa/ab/aaab", AllFurtherMatch
+    testGlob "**/aa/**", "ab/aa/aaab", AllFurtherMatch
+    testGlob "**/aa/**", "a/ab/aaab", NoMatch
 
   test "?":
-    block:
-      let r = matchGlob("a", "?")
-      check r.match == Match
-    block:
-      let r = matchGlob("aa", "?")
-      check r.match == NoFurtherMatch
-    block:
-      let r = matchGlob("abc", "?b?")
-      check r.match == Match
+    testMatch "?", "a"
+    testMatch "??", "aa"
+    testGlob "??", "a", NoMatch
+    testGlob "?", "", NoMatch
+    testMatch "?b?", "abc"
 
   test "combined":
-    block:
-      let r = matchGlob("aa", "**/?")
-      check r.match == NoMatch
-    block:
-      let r = matchGlob("abc", "?b?/**")
-      check r.match >= Match
-    block:
-      let r = matchGlob("qw/er/rty/ui/op/as/dsf/gh", "qw/er/**/dsf/*")
-      check r.match == Match
-    block:
-      let r = matchGlob("aa/som/x/a/som/thing", "**/som/?/**")
-      check r.match >= Match
-    block:
-      let r = matchGlob("/home/user/something.txt", "**/*.txt")
-      check r.match == Match
+    testGlob "**/?", "aa", NoMatch
+    testGlob "?b?/**", "abc", AllFurtherMatch
+    testMatch "qw/er/**/dsf/*", "qw/er/rty/ui/op/as/dsf/gh"
+    testGlob "**/som/?/**", "aa/som/x/a/som/thing", AllFurtherMatch
+    testMatch "**/*.txt", "/home/user/something.txt"
 
   test "expand disjoint":
     testMatch "{}", ""
@@ -236,10 +140,6 @@ suite "File searching":
     testMatch "{*.nim,*.nims}", "config.nims"
 
   test "cmplx disjoint":
-    #template testGroups(glob, matches: untyped) =
-    #  let r = expandAllGlobGroups(glob)
-    #  check r == matches
-
     testMatches "{1,2}b{3,4}", @["1b3", "1b4", "2b3", "2b4"]
     testMatches "j{1{2,3},4}h", @["j12h", "j13h", "j4h"]
     testMatches "{this,that} {damn ,}{dog,{cat,zebra}} {ran,{f,}{ate,lick}}",
@@ -265,9 +165,5 @@ suite "File searching":
       ]
 
   test "betwen":
-    block:
-      let r = matchGlob("abcd", "a[a-b][a-c][a-z]")
-      check r.match == Match
-    block:
-      let r = matchGlob("abcd", "ab[a-b]d")
-      check r.match == NoFurtherMatch
+    testMatch "a[a-b][a-c][a-z]", "abcd"
+    testGlob "ab[a-b]d", "abcd", NoFurtherMatch

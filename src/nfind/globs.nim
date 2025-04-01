@@ -56,14 +56,15 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       break
     if pt >= pathLen and (state.match != InDisjoint and glob[gt] != '{'):
       state.match = NoMatch
-      if glob[gt] == '/':
+      var onSep = glob[gt] == '/'
+      if onSep:
         inc gt
       if gt + 2 == glob.len:
         if glob[gt] == '*' and glob[gt + 1] == '*':
           state.match = AllFurtherMatch
         elif glob[gt] == '{' and glob[gt + 1] == '}':
           state.match = Match
-      elif gt + 1 == glob.len:
+      elif gt + 1 == glob.len and not onSep:
         if glob[gt] == '*':
           state.match = Match
       elif gt == glob.len:

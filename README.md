@@ -15,8 +15,8 @@ for path in find(".", {fsoFile}, filters):
   echo path
 ```
 
-lists every file in pwd that does not have a nim extension. Globs are always
-relative to the seach path for simplicity.
+lists every file in pwd that does not have a nim extension. Filters evaluate
+in order. Globs must always be relative to the seach path for simplicity.
 
 ```nim
 echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
@@ -32,14 +32,14 @@ echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
 * compatible with windows and posix paths
 
 ## why not use
-* new; could be missing some test cases
-* although tested on windows the win API code could probably be better
+* new - could be missing some test cases
+* although tested on windows, the win API code could probably be better
 
 ## nfind program
 
 With the library is an implementation of a find utility. I made it because I always forget the
 syntax for unix find. It's a simple example of how to use the library. Below are the help menus
-for the program.
+from the program.
 
 build with:
 ```bash
