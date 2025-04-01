@@ -25,10 +25,10 @@ echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
 
 ## why use
 * glob logic is designed to be efficient for walking directories
- * `GlobState` objects track progress of each pattern as the path gains depth
+ - `GlobState` objects track progress of each pattern as the path gains depth
 * hand rolled - no regex, no non-`std` dependencies
 * fairly robust features (eg. nested expressions in groups)
- * see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing  
+ - see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing  
 * compatible with windows and posix paths
 
 ## why not use
