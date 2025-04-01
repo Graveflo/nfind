@@ -5,7 +5,6 @@ author        = "Ryan McConnell"
 description   = "Glob utilities and find tool"
 license       = "MIT"
 srcDir        = "src"
-bin           = @["nfind"]
 
 
 # Dependencies
