@@ -19,8 +19,16 @@ lists every file in pwd that does not have a nim extension. Filters evaluate
 in order. Globs must always be relative to the seach path for simplicity.
 
 ```nim
-echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
+echo includes("./file.nims", [GlobFilter(incl: true, glob: "{*.nim,*.nims}")])
 ```
+
+Invalid globs will typically bail-out to literal comparisons, however some globs are not valid. Test if a glob is valid:
+
+```nim
+echo validateGlob("**.nim")
+```
+The above is invalid because `**` can only match path segments.
+`**/*.nim` will work for this instead.
 
 
 ## why use
@@ -28,7 +36,8 @@ echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
     - `GlobState` objects track progress of each pattern as the path gains depth
 * hand rolled - no regex, no non-`std` dependencies
 * fairly robust features (eg. nested expressions in groups)
-    - see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing  
+    - see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing
+    - in addition to above posix-style character sets are also supported
 * compatible with windows and posix paths
 
 ## why not use

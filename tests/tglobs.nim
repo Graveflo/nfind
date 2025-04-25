@@ -2,13 +2,16 @@ import std/[unittest]
 import nfind/globs
 
 template testMatches(glob: string; matches: untyped) =
+  check validateGlob(glob)
   for x in matches:
     check matchGlob(x, glob).match == Match
 
 template testMatch(glob: string; x: untyped) =
+  check validateGlob(glob)
   check matchGlob(x, glob).match == Match
 
 template testGlob(glob: string; x: untyped; mk: MatchKind) =
+  check validateGlob(glob)
   check matchGlob(x, glob).match == mk
 
 suite "File searching":
@@ -166,4 +169,17 @@ suite "File searching":
 
   test "betwen":
     testMatch "a[a-b][a-c][a-z]", "abcd"
+    testGlob "a[a-b][!a-c][a-z]", "abcd", NoFurtherMatch
     testGlob "ab[a-b]d", "abcd", NoFurtherMatch
+    testMatch "ab[!a-b]d", "abcd"
+    testMatch "[af-gj]", "a"
+    testMatch "[af-gj]", "f"
+    testMatch "[af-gj]", "g"
+    testMatch "[af-gj]", "j"
+    testMatch "[a-]", "-"
+    testMatch "[-]", "-"
+    # errors
+    testMatch "[af-gj", "[af-gj"
+    testMatch "[a", "[a"
+    testGlob "ab[c", "abc", NoFurtherMatch
+    testGlob "ab[]c", "abc", NoFurtherMatch

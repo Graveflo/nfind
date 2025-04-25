@@ -19,6 +19,41 @@ type
     pt* = 0
     match* = NoMatch
 
+proc validateGlob*(glob: string): bool =
+  result = true
+  var
+    gt = 0
+    djd = 0
+  template adv() =
+    inc gt
+    if gt >= glob.len:
+      return false
+
+  while gt < glob.len:
+    case glob[gt]
+    of '*':
+      inc gt
+      if gt < glob.len and glob[gt] == '*':
+        inc gt
+        if gt < glob.len and glob[gt] != '/':
+          return false
+        inc gt
+    of '{':
+      inc djd
+      inc gt
+    of '}':
+      djd = max(0, djd - 1)
+      inc gt
+    of '\\':
+      inc gt, 2
+    of '/':
+      inc gt
+      if gt < glob.len and glob[gt] == '/':
+        return false
+    else:
+      inc gt
+  result = result and djd == 0
+
 proc matchGlob*(path: string; glob: string; state: var GlobState) =
   var
     pt = state.pt
@@ -127,24 +162,59 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       inc pt
       inc gt
     of '[':
-      let rest = gt + 1
-      inc gt, 4
-      var
-        kill = gt >= glob.len
-        qel = glob[gt - 3] == '!'
-      if not (kill) and qel:
-        inc gt
-        kill = gt >= glob.len
-      kill = kill and glob[gt - 2] == '-' and glob[gt] == ']'
-      if kill:
-        gt = rest
+      let rest = gt
+      inc gt
+      if gt >= glob.len:
+        dec gt
         norm()
-      elif (path[pt] in glob[gt - 3] .. glob[gt - 1]) == qel:
-        state.match = NoFurtherMatch
-        break
       else:
-        inc pt
-        inc gt
+        let inverted = glob[gt] == '!'
+        if inverted:
+          inc gt
+          if gt >= glob.len:
+            gt = rest
+            norm()
+            continue
+        var
+          matches = false
+          bail = false
+        while true:
+          if glob[gt] == '\\':
+            inc gt
+            if gt >= glob.len:
+              dec gt
+          let w = glob[gt]
+          inc gt
+          if gt >= glob.len:
+            bail = true
+            break
+          if path[pt] == w:
+            matches = true
+          case glob[gt]
+          of ']':
+            break
+          of '-':
+            inc gt
+            if gt >= glob.len:
+              bail = true
+              break
+            if not matches:
+              if glob[gt] == ']': # posix glob compat
+                matches = path[pt] == '-'
+                break
+              else:
+                matches = path[pt] in w .. glob[gt]
+          else:
+            discard
+        if bail:
+          gt = rest
+          norm()
+        elif matches == inverted:
+          state.match = NoFurtherMatch
+          break
+        else:
+          inc gt
+          inc pt
     of '{':
       inc gt
       var
@@ -237,7 +307,7 @@ proc invert(k: MatchKind): MatchKind =
   of AllFurtherMatch: NoFurtherMatch
 
 proc findFirstGlob*(
-    path: string; filters: openArray[GlobFilter]; states: var seq[GlobState]
+    path: string; filters: openArray[GlobFilter]; states: var openArray[GlobState]
 ): int =
   result = -1
   for i in 0 ..< states.len:
@@ -263,7 +333,7 @@ proc findFirstGlob*(path: string; filters: openArray[GlobFilter]): int =
       return i
   return -1
 
-proc includes*(filters: openArray[GlobFilter]; path: string): bool =
+proc includes*(path: string; filters: openArray[GlobFilter]): bool =
   result = false
   let pos = findFirstGlob(path, filters)
   if pos > -1:

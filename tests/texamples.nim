@@ -9,4 +9,4 @@ let filters =
 for path in find(".", {fsoFile}, filters):
   echo path
 
-echo [GlobFilter(incl: true, glob: "{*.nim,*.nims}")].includes("./file.nims")
+echo includes("./file.nims", [GlobFilter(incl: true, glob: "{*.nim,*.nims}")])
