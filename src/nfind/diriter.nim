@@ -1,5 +1,5 @@
 import std/[sequtils, os, strutils]
-import os, globs
+import globs # 'os' is already imported from std/os in the line above
 
 export FsoKind, globs
 
@@ -42,13 +42,12 @@ when defined(posix):
 
   proc dirfd*(dirp: ptr DIR): cint {.importc, header: "<dirent.h>".}
 elif defined(windows):
-  import std/[winlean, strformat, widestrs]
+  import std/[winlean, strformat, widestrs, paths]
   # god i hate the windows API. This is absolute FILTH! and this is the less efficient, easy way (:
   type
     FINDEX_INFO_LEVELS {.size: sizeof(cint).} = enum
       FindExInfoStandard
       FindExInfoBasic
-      FindExInfoMaxInfoLevel
 
     FINDEX_SEARCH_OPS {.size: sizeof(cint).} = enum
       FindExSearchNameMatch
@@ -93,12 +92,14 @@ proc openDirIter*(path: string): DirIter =
   when defined(posix):
     opendir(path.cstring)
   elif defined(windows):
-    let adjust = &"{path}\\*"
-    let strconv = newWideCString(adjust.cstring, len(adjust))
+    let searchPath = path.joinPath("*")
+    let strconv = newWideCString(searchPath)
     result = DirIter()
     result.handle = FindFirstFileExW(
       strconv, FindExInfoBasic, result.data, FindExSearchNameMatch, nil, 0
     )
+    if result.handle == INVALID_HANDLE_VALUE:
+      raise newException(OSError, "Failed to open directory: '" & path & "'. Windows Error Code: " & $getLastError())
 
 proc name*(it: ItFso): string =
   when defined(windows):

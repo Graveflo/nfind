@@ -1,6 +1,17 @@
 import std/[strutils, os]
 
 type
+  FsoKind* = enum
+    fsoFile
+    fsoDir
+    fsoLink
+    fsoBlk
+    fsoChar
+    fsoFifo
+    fsoSock
+    fsoSpecial
+    fsoUnknown
+
   GlobFilter* = object
     incl*: bool
     inverted* = false

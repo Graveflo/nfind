@@ -1,6 +1,7 @@
 import std/[strformat, strutils, os, compilesettings]
 
-switch("path", "src")
+# switch("path", "src") # <--- Commenting this out
+echo "Executing root config.nims (src path switch commented out)."
 
 let projectPath = when defined(mingw):
     getCurrentDir().parentDir().replace("\\", "/")
@@ -16,7 +17,7 @@ proc getCommandlineOptions(): seq[string] =
       result.add part
 
 proc doBuild(src: string, cmdln: seq[string] = @[]) =
-  if not dirExists("bin"):
+  if not dirExists("bin"): # This will now rely on std/os being correctly resolved
     mkDir("bin")
   var
     fn = src.splitFile[1]
@@ -33,4 +34,3 @@ proc doBuild(src: string, cmdln: seq[string] = @[]) =
 
 task buildNFind, "builds nfind":
   doBuild("nfind.nim", @["--stacktrace:off", "--mm:arc", "--threads:off"])
-
