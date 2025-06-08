@@ -1,4 +1,6 @@
 import nfind/diriter
+import nfind/globs # For GlobFilter, includes
+import nfind/nfos  # For FsoKind members like fsoFile
 
 let filters =
   @[

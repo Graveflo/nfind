@@ -5,6 +5,7 @@ import std/osproc # For execCmd, execCmdEx
 import std/sequtils
 import std/strutils # For replace
 import nfind/diriter # Changed path
+import nfind/nfos # For FsoKind
 
 const tempTestBaseDir = "tests" / "temp_test_data"
 const tempTestDir = tempTestBaseDir / "windows_diriter"

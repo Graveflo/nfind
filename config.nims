@@ -1,7 +1,7 @@
 import std/[strformat, strutils, os, compilesettings]
 
 switch("path", "src") # <--- Uncommented
-echo "Executing root config.nims (src path switch commented out)."
+# echo "Executing root config.nims (src path switch commented out)." # Removed echo
 
 let projectPath = when defined(mingw):
     getCurrentDir().parentDir().replace("\\", "/")

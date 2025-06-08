@@ -10,5 +10,12 @@
 **/profile_results.txt
 **/bin/**
 **/deps/**
-test_data_windows_generated/
+# test_data_windows_generated/ # Obsolete, test data now in tests/temp_test_data/
 tests/temp_test_data/
+
+# Specific test executables
+tests/tdiriter
+tests/tdiriter_windows # Renamed
+tests/tglobs
+tests/tminimal_os
+tests/texamples
