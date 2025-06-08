@@ -10,3 +10,5 @@
 **/profile_results.txt
 **/bin/**
 **/deps/**
+test_data_windows_generated/
+tests/temp_test_data/

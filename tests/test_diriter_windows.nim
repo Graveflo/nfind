@@ -1,14 +1,13 @@
 import std/unittest
 import std/os
-# import std/ospaths # Explicitly import ospaths - removing as it's deprecated and didn't help
-# import std/paths    # Trying std/paths - remove as unused and to clear warning
+import std/osproc # For execCmd, execCmdEx
+# import std/strformat # For fmt - removing, will use strutils.replace
 import std/sequtils
-import std/strutils
-import ../src/nfind/diriter # Adjusted path to diriter.nim
-# If FsoKind and find are not automatically exported, they might need explicit import
-# from ../src/nfind/diriter import FsoKind, find # Assuming diriter.nim exports these
+import std/strutils # For replace
+import nfind/diriter # Changed path
 
-const testDataBasePath = "tests" / "test_data_windows" / "diriter_test"
+const tempTestBaseDir = "tests" / "temp_test_data"
+const tempTestDir = tempTestBaseDir / "windows_diriter"
 
 proc normalizePathSeq(paths: seq[string]): seq[string] =
   result = newSeq[string](paths.len)
@@ -17,101 +16,142 @@ proc normalizePathSeq(paths: seq[string]): seq[string] =
     normalizePath(tempPath)
     result[i] = tempPath
 
-suite "Windows Directory Iteration Tests":
-  test "Iterate Empty Directory":
-    let emptyDirPath = testDataBasePath / "empty_dir"
-    var itemsFound = 0
-    for item in find(emptyDirPath, {fsoFile, fsoDir}, []):
-      itemsFound += 1
-    check itemsFound == 0
+proc runOrFail(cmdPattern: string, pathArg: string): void =
+  let cmd = cmdPattern.replace("{}", pathArg)
+  echo "Executing: ", cmd
+  let (output, exitCode) = execCmdEx(cmd)
+  if exitCode != 0:
+    echo "Command failed with exit code: ", exitCode
+    echo "Output:\n", output
+    quit(1) # Fail fast if setup/teardown commands don't work
 
-  test "Iterate Non-Empty Directory":
-    let nonEmptyDirPath = testDataBasePath / "non_empty_dir"
-    var expectedItems = @[
-      "file1.txt",
-      "file2.log",
-      "sub_dir1"
-    ].mapIt(nonEmptyDirPath / it)
-    expectedItems = normalizePathSeq(expectedItems)
+proc setupTestSuite(): void =
+  echo "Setting up test suite..."
+  let createDirCmdPattern = when defined(windows): "cmd /c mkdir \"{}\"" else: "mkdir -p \"{}\""
+  let createFileCmdPattern = when defined(windows): "cmd /c \"type nul > \"{}\"\"" else: "touch \"{}\""
 
+  # Create directory structure
+  runOrFail(createDirCmdPattern, tempTestDir)
+  runOrFail(createDirCmdPattern, tempTestDir / "empty_dir")
 
-    var foundItems: seq[string] = @[]
-    for item in find(nonEmptyDirPath, {fsoFile, fsoDir}, []):
-      var tempItem = item
-      normalizePath(tempItem)
-      foundItems.add(tempItem)
-      check tempItem.splitPath.tail != "."      # Using splitPath.tail
-      check tempItem.splitPath.tail != ".."      # Using splitPath.tail
+  let nonEmptyDirPath = tempTestDir / "non_empty_dir"
+  runOrFail(createDirCmdPattern, nonEmptyDirPath)
+  runOrFail(createDirCmdPattern, nonEmptyDirPath / "sub_dir1")
 
-    check foundItems.len == expectedItems.len
-    for expected in expectedItems:
-      check foundItems.contains(expected)
+  # Create empty files
+  runOrFail(createFileCmdPattern, nonEmptyDirPath / "file1.txt")
+  runOrFail(createFileCmdPattern, nonEmptyDirPath / "file2.log")
+  echo "Test suite setup complete."
 
-    # Check basenames explicitly
-    let foundBasenames = foundItems.map(proc (p: string): string = p.splitPath.tail) # Using splitPath.tail
-    let expectedBasenames = @["file1.txt", "file2.log", "sub_dir1"]
-    for bn in expectedBasenames:
-      check foundBasenames.contains(bn)
+proc teardownTestSuite(): void =
+  echo "Tearing down test suite..."
+  let removeDirCmdPattern = when defined(windows): "cmd /c rmdir /s /q \"{}\"" else: "rm -rf \"{}\""
+  runOrFail(removeDirCmdPattern, tempTestDir)
 
-  test "Filter Specific File Types":
-    let path = testDataBasePath / "non_empty_dir"
-
-    # Test for fsoFile
-    var expectedFiles = @[
-      "file1.txt",
-      "file2.log"
-    ].mapIt(path / it)
-    expectedFiles = normalizePathSeq(expectedFiles)
-
-    var foundFiles: seq[string] = @[]
-    for item in find(path, {fsoFile}, []):
-      var tempItem = item
-      normalizePath(tempItem)
-      foundFiles.add(tempItem)
-
-    check foundFiles.len == expectedFiles.len
-    for expected in expectedFiles:
-      check foundFiles.contains(expected)
-
-    # Test for fsoDir
-    var expectedDirs = @[
-      "sub_dir1"
-    ].mapIt(path / it)
-    expectedDirs = normalizePathSeq(expectedDirs)
-
-    var foundDirs: seq[string] = @[]
-    for item in find(path, {fsoDir}, []):
-      var tempItem = item
-      normalizePath(tempItem)
-      foundDirs.add(tempItem)
-
-    check foundDirs.len == expectedDirs.len
-    for expected in expectedDirs:
-      check foundDirs.contains(expected)
-
-  test "Iterate Non-Existent Directory":
-    let nonExistentPath = testDataBasePath / "non_existent_dir"
-
-    when defined(windows):
-      expect OSError:
-        for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
-          discard item # Should not reach here
-
+  # Attempt to remove the base directory if it's empty.
+  # This part is best-effort; primary cleanup is tempTestDir itself.
+  # Check if tempTestBaseDir exists and is empty before attempting to remove.
+  if dirExists(tempTestBaseDir):
+    var isEmpty = true
+    for _ in walkDir(tempTestBaseDir, relative = true): # Check if any files/dirs remain
+      isEmpty = false
+      break
+    if isEmpty:
       try:
-        for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
-          discard item
-        check false # Should have raised OSError
-      except OSError as e:
-        check e.msg.contains(nonExistentPath)
-        check e.msg.contains("Windows Error Code") # Specific to Windows error message
-    else:
-      # On non-Windows, current diriter.nim for POSIX returns nil, find iterator yields nothing.
-      var itemsFound = 0
-      for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
-        itemsFound += 1
-      check itemsFound == 0 # Expect no items and no error
+        runOrFail(removeDirCmdPattern, tempTestBaseDir)
+      except: # Ignore if removal of base dir fails (e.g. due to other test suites using it)
+        echo "Could not remove base temp dir: ", tempTestBaseDir, " (might be in use or already removed)"
 
-# Tests are typically run automatically when the file is the main module
-# and contains suite/test blocks.
-# If not, specific unittest procs like `runAllTests()` might be needed,
-# or configuration through .nimble file.
+  echo "Test suite teardown complete."
+
+suite "Windows Directory Iteration Tests":
+  setupTestSuite()
+
+  try:
+    test "Iterate Empty Directory":
+      let emptyDirPath = tempTestDir / "empty_dir"
+      var itemsFound = 0
+      for item in find(emptyDirPath, {fsoFile, fsoDir}, []):
+        itemsFound += 1
+      check itemsFound == 0
+
+    test "Iterate Non-Empty Directory":
+      let nonEmptyDirPath = tempTestDir / "non_empty_dir"
+      var expectedItems = @[
+        "file1.txt",
+        "file2.log",
+        "sub_dir1"
+      ].mapIt(nonEmptyDirPath / it)
+      expectedItems = normalizePathSeq(expectedItems)
+
+      var foundItems: seq[string] = @[]
+      for item in find(nonEmptyDirPath, {fsoFile, fsoDir}, []):
+        var tempItem = item
+        normalizePath(tempItem)
+        foundItems.add(tempItem)
+        check tempItem.splitPath.tail != "."
+        check tempItem.splitPath.tail != ".."
+
+      check foundItems.len == expectedItems.len
+      for expected in expectedItems:
+        check foundItems.contains(expected)
+
+      let foundBasenames = foundItems.map(proc (p: string): string = p.splitPath.tail)
+      let expectedBasenames = @["file1.txt", "file2.log", "sub_dir1"]
+      for bn in expectedBasenames:
+        check foundBasenames.contains(bn)
+
+    test "Filter Specific File Types":
+      let path = tempTestDir / "non_empty_dir"
+      var expectedFiles = @[
+        "file1.txt",
+        "file2.log"
+      ].mapIt(path / it)
+      expectedFiles = normalizePathSeq(expectedFiles)
+
+      var foundFiles: seq[string] = @[]
+      for item in find(path, {fsoFile}, []):
+        var tempItem = item
+        normalizePath(tempItem)
+        foundFiles.add(tempItem)
+
+      check foundFiles.len == expectedFiles.len
+      for expected in expectedFiles:
+        check foundFiles.contains(expected)
+
+      var expectedDirs = @[
+        "sub_dir1"
+      ].mapIt(path / it)
+      expectedDirs = normalizePathSeq(expectedDirs)
+
+      var foundDirs: seq[string] = @[]
+      for item in find(path, {fsoDir}, []):
+        var tempItem = item
+        normalizePath(tempItem)
+        foundDirs.add(tempItem)
+
+      check foundDirs.len == expectedDirs.len
+      for expected in expectedDirs:
+        check foundDirs.contains(expected)
+
+    test "Iterate Non-Existent Directory":
+      let nonExistentPath = tempTestDir / "non_existent_dir"
+      when defined(windows):
+        expect OSError:
+          for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
+            discard item
+
+        try:
+          for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
+            discard item
+          check false
+        except OSError as e:
+          check e.msg.contains(nonExistentPath)
+          check e.msg.contains("Windows Error Code")
+      else:
+        var itemsFound = 0
+        for item in find(nonExistentPath, {fsoFile, fsoDir}, []):
+          itemsFound += 1
+        check itemsFound == 0
+  finally:
+    teardownTestSuite()

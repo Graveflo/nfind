@@ -1,6 +1,6 @@
 import std/[strformat, strutils, os, compilesettings]
 
-# switch("path", "src") # <--- Commenting this out
+switch("path", "src") # <--- Uncommented
 echo "Executing root config.nims (src path switch commented out)."
 
 let projectPath = when defined(mingw):

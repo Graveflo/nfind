@@ -1,5 +1,5 @@
 import std/[sequtils, os, strutils]
-import globs # 'os' is already imported from std/os in the line above
+import os, globs
 
 export FsoKind, globs
 
@@ -42,12 +42,13 @@ when defined(posix):
 
   proc dirfd*(dirp: ptr DIR): cint {.importc, header: "<dirent.h>".}
 elif defined(windows):
-  import std/[winlean, strformat, widestrs, paths]
+  import std/[winlean, strformat, widestrs]
   # god i hate the windows API. This is absolute FILTH! and this is the less efficient, easy way (:
   type
     FINDEX_INFO_LEVELS {.size: sizeof(cint).} = enum
       FindExInfoStandard
       FindExInfoBasic
+      FindExInfoMaxInfoLevel
 
     FINDEX_SEARCH_OPS {.size: sizeof(cint).} = enum
       FindExSearchNameMatch
@@ -92,14 +93,12 @@ proc openDirIter*(path: string): DirIter =
   when defined(posix):
     opendir(path.cstring)
   elif defined(windows):
-    let searchPath = path.joinPath("*")
-    let strconv = newWideCString(searchPath)
+    let adjust = &"{path}\\*"
+    let strconv = newWideCString(adjust.cstring, len(adjust))
     result = DirIter()
     result.handle = FindFirstFileExW(
       strconv, FindExInfoBasic, result.data, FindExSearchNameMatch, nil, 0
     )
-    if result.handle == INVALID_HANDLE_VALUE:
-      raise newException(OSError, "Failed to open directory: '" & path & "'. Windows Error Code: " & $getLastError())
 
 proc name*(it: ItFso): string =
   when defined(windows):
@@ -147,55 +146,89 @@ iterator find*(
     working.setLen(working.len - 1)
   let addingInclAll = not filtersl.anyIt(it.incl)
   var filters = newSeqOfCap[GlobFilter](filtersl.len + ord(addingInclAll))
-  var wgs = newSeqofCap[GlobState](filters.len)
+  var baseStatesTemplate = newSeqOfCap[GlobState](filtersl.len + ord(addingInclAll))
   for filter in filtersl:
-    wgs.add GlobState(pt: len(working) + 1)
-    filters.add filter
+    baseStatesTemplate.add(GlobState(pt: len(working) + 1, gt: 0, match: NoMatch))
+    filters.add(filter)
   if addingInclAll:
-    filters.add GlobFilter(incl: true, glob: "**")
-    wgs.add GlobState(pt: len(working))
-  # absolute path so there is no nonsense from the os APIs
-  var dirc = @[(openDirIter(path.absolutePath), wgs)]
+    filters.add(GlobFilter(incl: true, glob: "**"))
+    baseStatesTemplate.add(GlobState(pt: len(working), gt: 0, match: NoMatch))
+
+  var dirc = @[(openDirIter(path.absolutePath), baseStatesTemplate)] # Store the initial template
   try:
     if isValid(dirc[^1][0]):
       while true:
-        wgs[0 ..< len(wgs)] = dirc[^1][1]
+        # currentDirStatesTemplate is not needed, baseStatesTemplate is the one from dirc[^1][1]
+        # However, dirc[^1][1] is not changing per level with this new logic, it's always initial baseStatesTemplate.
+        # Let's use a consistent name for the template from dirc.
+        let fixedBaseStatesTemplate = dirc[^1][1]
         var fso = next(dirc[^1][0])
         if fso == nil:
           let pack = dirc.pop()
           close(pack[0])
           if dirc.len <= 0:
             break
-          if working[^1] == DirSep:
+          if working[^1] == DirSep: # Adjust `working` path when moving up
             working.setLen(working.len - 1)
-          working.setLen when defined(danger):
-            working.rfind(DirSep)
-          else:
-            max(working.rfind(DirSep), 0)
+          let newLen = when defined(danger): # Path for setLen needs to be determined before the when defined(danger)
+                         working.rfind(DirSep)
+                       else:
+                         max(working.rfind(DirSep), 0)
+          working.setLen(newLen)
         else:
           let thisName = fso.name
           if thisName notin skips:
             let thisPath = working & DirSep & thisName
-            let fidx = findFirstGlob(thisPath, filters, wgs)
+
+            var statesForThisPath = newSeqOfCap[GlobState](filters.len)
+            for i in 0 ..< filters.len:
+              statesForThisPath.add(GlobState(pt: fixedBaseStatesTemplate[i].pt, gt: 0, match: NoMatch))
+
+            let fidx = findFirstGlob(thisPath, filters, statesForThisPath) # Use fresh states for this path
             let tftype = entryKind(dirc[^1][0], fso)
             var recurse = tftype == fsoDir
-            if fidx > -1:
+            var shouldYield = false
+
+            if fidx > -1: # A filter matched thisPath
               if filters[fidx].incl:
-                if tftype in acceptTypes:
-                  yield thisPath
-              else:
-                # if there is an incl filter before this we have to keep going
-                var flag = true
-                for i in 0 ..< fidx:
-                  if filters[i].incl:
-                    flag = false
-                    break
-                if flag and wgs[fidx].match == AllFurtherMatch:
-                  recurse = false
+                var excludedByLaterFilter = false
+                for k in (fidx + 1) ..< filters.len:
+                  if not filters[k].incl:
+                    var exclusionStateCheck = GlobState(pt: fixedBaseStatesTemplate[k].pt, gt: 0, match: NoMatch)
+                    matchGlob(thisPath, filters[k].glob, exclusionStateCheck)
+                    if exclusionStateCheck.match >= Match:
+                      excludedByLaterFilter = true
+                      if exclusionStateCheck.match == AllFurtherMatch:
+                        recurse = false
+                      break
+                if not excludedByLaterFilter and tftype in acceptTypes:
+                  shouldYield = true
+              else: # First matching filter is an exclusion
+                if statesForThisPath[fidx].match == AllFurtherMatch: # Use the match state from statesForThisPath
+                  var flag = true
+                  for i in 0 ..< fidx:
+                    if filters[i].incl:
+                        var precedingInclStateCheck = GlobState(pt: fixedBaseStatesTemplate[i].pt, gt: 0, match: NoMatch)
+                        matchGlob(thisPath, filters[i].glob, precedingInclStateCheck)
+                        if precedingInclStateCheck.match >= Match:
+                            flag = false; break
+                  if flag: recurse = false
+
+            if shouldYield:
+              yield thisPath
+
             if recurse:
               let newd = openDirIter(thisPath)
               if isValid(newd):
-                dirc.add (newd, wgs)
+                var nextLevelBaseStates = newSeqOfCap[GlobState](filters.len)
+                for i in 0 ..< filters.len:
+                  var ptForNextLevel: int
+                  if filters[i].glob == "**":
+                    ptForNextLevel = len(thisPath)
+                  else:
+                    ptForNextLevel = len(thisPath) + 1
+                  nextLevelBaseStates.add(GlobState(pt: ptForNextLevel, gt: 0, match: NoMatch))
+                dirc.add (newd, nextLevelBaseStates)
                 working = thisPath
   finally:
     for pack in dirc:

@@ -4,15 +4,15 @@ import std/strutils
 import std/sequtils
 import std/winlean # For windows specific symlink commands if direct os.createSymlink is not used
 import std/paths # For `/` operator and parentDir, relativePath
-# import std/ossymlinks # Removed as it was not found
+import std/osproc # For execShellCmd, execCmdEx
+import std/strutils # For replace, needed if using it for command formatting
 
 # Importing modules from src/nfind
-# This assumes the compiler will be run from the project root or
-# that the src path is otherwise made available.
-import ../src/nfind/diriter
-import ../src/nfind/globs
+# Path should be resolved by tests/config.nims
+import nfind/diriter
+import nfind/globs
 
-suite "Windows diriter tests":
+suite "Windows diriter tests": # Suite name might be a bit misleading if it's a general diriter test
   const TestDirBase = "test_temp_dir_tdiriter" # Unique name for this test suite
 
   proc setupTestDir(testName: string): string =
@@ -39,27 +39,62 @@ suite "Windows diriter tests":
   proc createTestFile(filePath: string, content: string = "") =
     let parent = filePath.parentDir()
     if not dirExists(parent):
-      createDir(parent)
-    writeFile(filePath, content)
+      # Using os.createDir, assuming it works. If not, this also needs osproc.
+      try:
+        createDir(parent)
+      except:
+        # Fallback to osproc if os.createDir fails (as seen with other file ops)
+        let createDirCmdPattern = when defined(windows): "cmd /c mkdir \"{}\"" else: "mkdir -p \"{}\""
+        let cmd = createDirCmdPattern.replace("{}", parent)
+        if execCmdEx(cmd).exitCode != 0:
+          echo "Failed to create parent directory via osproc: ", parent
+          quit(1)
 
-  # Windows specific symlink creation
-  proc createSymlinkCmd(linkName: string, targetName: string, isDir: bool = false) =
-    var cmd = "cmd /c mklink "
-    if isDir:
-      cmd &= "/D "
-    # Ensure paths are absolute for mklink if they have spaces or complex chars,
-    # or ensure they are correctly relative from the CWD where cmd runs.
-    # For simplicity, using absolute paths can be more robust for tool execution.
-    let absLinkName = linkName.absolutePath()
-    let absTargetName = targetName.absolutePath()
+    # Use osproc to create the file
+    # For content, simple echo should work for test purposes. Complex content would need more robust escaping.
+    let escapedContent = content.replace("\"", "\\\"").replace("'", "'\\''") # Basic escaping for shell
+    let createFileCmd = when defined(windows):
+      # Windows echo is tricky with quotes. `echo content > file` is simpler.
+      # Using `set /p` for more robust echo, though it adds a newline.
+      # Or, more simply for tests, ensure content doesn't have problematic chars or use type for empty.
+      if content.len == 0:
+        "cmd /c \"type nul > \"{}\"\"".replace("{}", filePath)
+      else:
+        # This is still tricky for arbitrary content on cmd.exe
+        # A common workaround is to write to a temp file then move, or use powershell.
+        # For now, keeping it simple, assuming test content is benign.
+        "cmd /c \"echo " & escapedContent & " > \"{}\"\"".replace("{}", filePath)
+    else: # POSIX
+      if content.len == 0:
+        "touch \"{}\"".replace("{}", filePath)
+      else:
+        "sh -c \"printf '%s' '" & escapedContent & "' > \"{}\"\"".replace("{}", filePath)
 
-    cmd &= "\"" & absLinkName & "\" \"" & absTargetName & "\""
-    echo "Executing: ", cmd
-    if execShellCmd(cmd) != 0:
-      echo "Warning: Failed to create symlink '", absLinkName, "' -> '", absTargetName, "'. MKLINK might require admin privileges or Developer Mode."
-    # Ensure symlink creation has a moment to take effect, especially on Windows
+    echo "Executing file creation: ", createFileCmd
+    let (output, exitCode) = execCmdEx(createFileCmd)
+    if exitCode != 0:
+      echo "Failed to create file: ", filePath
+      echo "Command: ", createFileCmd
+      echo "Output: ", output
+      quit(1)
+
+  # Platform-aware symlink creation
+  proc createTestSymlink(linkName: string, targetName: string, isDir: bool = false) =
+    var cmd = ""
+    when defined(windows):
+      cmd = "cmd /c mklink "
+      if isDir:
+        cmd &= "/D "
+      cmd &= "\"" & linkName.absolutePath() & "\" \"" & targetName.absolutePath() & "\""
+    else: # POSIX
+      cmd = "ln -s \"" & targetName.absolutePath() & "\" \"" & linkName.absolutePath() & "\""
+
+    echo "Executing symlink creation: ", cmd
+    let (output, exitCode) = execCmdEx(cmd)
+    if exitCode != 0:
+      echo "Warning: Failed to create symlink '", linkName, "' -> '", targetName, "'. Output: ", output
+    # Ensure symlink creation has a moment to take effect
     sleep(100)
-
 
   test "Basic file and directory listing":
     let testRoot = setupTestDir("basic_listing")
@@ -130,8 +165,10 @@ suite "Windows diriter tests":
     let symlinkToFile = testRoot / "s_file.txt"
     let symlinkToDir = testRoot / "s_dir"
 
-    createSymlinkCmd(symlinkToFile, actualFile, isDir = false)
-    createSymlinkCmd(symlinkToDir, actualDir, isDir = true)
+    # Only attempt to create and check symlinks if on a platform where it's likely to succeed
+    # or where the test is specifically targeted. For now, we attempt creation and log warnings.
+    createTestSymlink(symlinkToFile, actualFile, isDir = false)
+    createTestSymlink(symlinkToDir, actualDir, isDir = true)
 
     var foundItemsRelative = newSeq[string]()
     var foundKinds = newSeq[(string, FsoKind)]()
