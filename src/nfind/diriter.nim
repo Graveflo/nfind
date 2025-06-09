@@ -1,7 +1,8 @@
 import std/[sequtils, os, strutils]
-import os, globs
+import ./globs # For GlobFilter, GlobState, findFirstGlob, matchGlob, MatchKind enum members (NoMatch, etc.)
+import ./nfos  # For FsoKind and its enum members (fsoFile, etc.)
 
-export FsoKind, globs
+# diriter.nim exports its own types (DirIter*, ItFso*) and iterator (find*) by using '*' marker on their definition.
 
 when defined(posix):
   import std/posix
@@ -42,13 +43,13 @@ when defined(posix):
 
   proc dirfd*(dirp: ptr DIR): cint {.importc, header: "<dirent.h>".}
 elif defined(windows):
-  import std/[winlean, strformat, widestrs]
-  # god i hate the windows API. This is absolute FILTH! and this is the less efficient, easy way (:
-  type
+  import std/[winlean, strformat, widestrs, paths] # Added paths for joinPath
+
+  type # Windows-specific types, not from globs or nfos
     FINDEX_INFO_LEVELS {.size: sizeof(cint).} = enum
       FindExInfoStandard
       FindExInfoBasic
-      FindExInfoMaxInfoLevel
+      # FindExInfoMaxInfoLevel # Removed in PR #6
 
     FINDEX_SEARCH_OPS {.size: sizeof(cint).} = enum
       FindExSearchNameMatch
@@ -75,7 +76,7 @@ elif defined(windows):
   proc convDwFileAttrToFsoKind(attr: int32): FsoKind =
     if (attr and FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_DIRECTORY:
       fsoDir
-    elif (attr and FILE_ATTRIBUTE_DIRECTORY) == FILE_ATTRIBUTE_REPARSE_POINT:
+    elif (attr and FILE_ATTRIBUTE_REPARSE_POINT) == FILE_ATTRIBUTE_REPARSE_POINT: # Corrected this condition from previous state
       fsoLink
     else:
       fsoFile
@@ -92,13 +93,15 @@ proc isValid*(it: DirIter): bool =
 proc openDirIter*(path: string): DirIter =
   when defined(posix):
     opendir(path.cstring)
-  elif defined(windows):
-    let adjust = &"{path}\\*"
-    let strconv = newWideCString(adjust.cstring, len(adjust))
+  elif defined(windows): # Using the version from PR #6 that raised OSError
+    let searchPath = path.joinPath("*") # from std/paths
+    let strconv = newWideCString(searchPath)
     result = DirIter()
     result.handle = FindFirstFileExW(
-      strconv, FindExInfoBasic, result.data, FindExSearchNameMatch, nil, 0
+      strconv, FindExInfoBasic, result.data, FindExSearchNameMatch, nil, 0 # FindExInfoBasic from local enum
     )
+    if result.handle == INVALID_HANDLE_VALUE:
+      raise newException(OSError, "Failed to open directory: '" & path & "'. Windows Error Code: " & $getLastError())
 
 proc name*(it: ItFso): string =
   when defined(windows):
@@ -109,7 +112,7 @@ proc name*(it: ItFso): string =
 
 proc next*(it: var DirIter): ItFso =
   when defined(windows):
-    if findNextFileW(it.handle, it.data) == 0:
+    if findNextFileW(it.handle, it.data) == 0: # findNextFileW from winlean
       return nil
     result = it.data.addr
   else:
@@ -120,7 +123,7 @@ proc entryKind*(it: DirIter; fso: ItFso): FsoKind =
     convDwFileAttrToFsoKind(fso[].dwFileAttributes)
   else:
     {.warning[Uninit]: off.}
-    if fso.d_type == DT_UNKNOWN: # file system doesn't support effecient typing
+    if fso.d_type == DT_UNKNOWN:
       var st: Stat
       if fstatat(dirfd(it), fso.dName[0].addr, st, AT_SYMLINK_NOFOLLOW) == -1:
         fsoUnknown
@@ -131,12 +134,12 @@ proc entryKind*(it: DirIter; fso: ItFso): FsoKind =
 
 proc close*(it: DirIter) =
   when defined(windows):
-    findClose(it.handle)
+    findClose(it.handle) # from winlean
   else:
     discard closedir(it)
 
 const skips = [".", ".."]
-export FsoKind
+
 iterator find*(
     path: string; acceptTypes: set[FsoKind]; filtersl: openArray[GlobFilter]
 ): string =
@@ -146,19 +149,19 @@ iterator find*(
     working.setLen(working.len - 1)
   let addingInclAll = not filtersl.anyIt(it.incl)
   var filters = newSeqOfCap[GlobFilter](filtersl.len + ord(addingInclAll))
-  var wgs = newSeqofCap[GlobState](filters.len)
+  var baseStatesTemplate = newSeqOfCap[GlobState](filtersl.len + ord(addingInclAll))
   for filter in filtersl:
-    wgs.add GlobState(pt: len(working) + 1)
-    filters.add filter
+    baseStatesTemplate.add(GlobState(pt: len(working) + 1, gt: 0, match: NoMatch))
+    filters.add(filter)
   if addingInclAll:
-    filters.add GlobFilter(incl: true, glob: "**")
-    wgs.add GlobState(pt: len(working))
-  # absolute path so there is no nonsense from the os APIs
-  var dirc = @[(openDirIter(path.absolutePath), wgs)]
+    filters.add(GlobFilter(incl: true, glob: "**"))
+    baseStatesTemplate.add(GlobState(pt: len(working), gt: 0, match: NoMatch))
+
+  var dirc = @[(openDirIter(path.absolutePath), baseStatesTemplate)]
   try:
     if isValid(dirc[^1][0]):
       while true:
-        wgs[0 ..< len(wgs)] = dirc[^1][1]
+        let fixedBaseStatesTemplate = dirc[^1][1]
         var fso = next(dirc[^1][0])
         if fso == nil:
           let pack = dirc.pop()
@@ -167,34 +170,55 @@ iterator find*(
             break
           if working[^1] == DirSep:
             working.setLen(working.len - 1)
-          working.setLen when defined(danger):
-            working.rfind(DirSep)
-          else:
-            max(working.rfind(DirSep), 0)
+          let newLen = when defined(danger):
+                         working.rfind(DirSep)
+                       else:
+                         max(working.rfind(DirSep), 0)
+          working.setLen(newLen)
         else:
           let thisName = fso.name
           if thisName notin skips:
             let thisPath = working & DirSep & thisName
-            let fidx = findFirstGlob(thisPath, filters, wgs)
+
+            var statesForThisPath = newSeqOfCap[GlobState](filters.len)
+            for i in 0 ..< filters.len:
+              statesForThisPath.add(GlobState(pt: fixedBaseStatesTemplate[i].pt, gt: 0, match: NoMatch))
+
+            let fidx = findFirstGlob(thisPath, filters, statesForThisPath)
             let tftype = entryKind(dirc[^1][0], fso)
             var recurse = tftype == fsoDir
+            var shouldYield = false
+
             if fidx > -1:
               if filters[fidx].incl:
-                if tftype in acceptTypes:
-                  yield thisPath
+                var excludedByLaterFilter = false
+                for k in (fidx + 1) ..< filters.len:
+                  if not filters[k].incl:
+                    var exclusionStateCheck = GlobState(pt: fixedBaseStatesTemplate[k].pt, gt: 0, match: NoMatch)
+                    matchGlob(thisPath, filters[k].glob, exclusionStateCheck)
+                    if exclusionStateCheck.match >= Match:
+                      excludedByLaterFilter = true
+                      if exclusionStateCheck.match == AllFurtherMatch: recurse = false
+                      break
+                if not excludedByLaterFilter and tftype in acceptTypes: shouldYield = true
               else:
-                # if there is an incl filter before this we have to keep going
-                var flag = true
-                for i in 0 ..< fidx:
-                  if filters[i].incl:
-                    flag = false
-                    break
-                if flag and wgs[fidx].match == AllFurtherMatch:
-                  recurse = false
+                if statesForThisPath[fidx].match == AllFurtherMatch:
+                  var flag = true
+                  for i in 0 ..< fidx:
+                    if filters[i].incl:
+                        var precedingInclStateCheck = GlobState(pt: fixedBaseStatesTemplate[i].pt, gt: 0, match: NoMatch)
+                        matchGlob(thisPath, filters[i].glob, precedingInclStateCheck)
+                        if precedingInclStateCheck.match >= Match: flag = false; break
+                  if flag: recurse = false
+
+            if shouldYield: yield thisPath
+
             if recurse:
               let newd = openDirIter(thisPath)
               if isValid(newd):
-                dirc.add (newd, wgs)
+                # Pass down the same fixedBaseStatesTemplate for the next level,
+                # as pt values are relative to the original find path.
+                dirc.add (newd, fixedBaseStatesTemplate)
                 working = thisPath
   finally:
     for pack in dirc:
