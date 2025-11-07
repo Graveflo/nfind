@@ -57,10 +57,7 @@ proc appSpringboard(c: var Config): int =
           break
       if match:
         if cfEchoMatch in c.flags:
-          when defined(windows): # windows cmd hates ANSI evenin 2025
-            echo path
-          else:
-            stdout.styledWriteLine(c.matchColor, path)
+          echo path
       else:
         if cfEchoNonMatch in c.flags:
           when defined(windows):

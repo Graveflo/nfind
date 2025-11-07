@@ -7,8 +7,6 @@ type
     glob*: string
 
   MatchKind* = enum
-    InDisjoint
-    # Below are actual return values
     NoFurtherMatch
     NoMatch
     Match
@@ -18,6 +16,12 @@ type
     gt* = 0
     pt* = 0
     match* = NoMatch
+
+proc globIncl*(glob: sink string): GlobFilter =
+  GlobFilter(incl: true, glob: glob)
+
+proc globExcl*(glob: sink string): GlobFilter =
+  GlobFilter(incl: false, glob: glob)
 
 proc validateGlob*(glob: string): bool =
   result = true
@@ -35,6 +39,11 @@ proc validateGlob*(glob: string): bool =
       inc gt
       if gt < glob.len and glob[gt] == '*':
         inc gt
+        var djn = djd
+        while gt < glob.len and djn > 0 and glob[gt] == '}':
+          dec djn
+          djd = max(0, djd - 1)
+          inc gt
         if gt < glob.len and glob[gt] != '/':
           return false
         inc gt
@@ -54,10 +63,31 @@ proc validateGlob*(glob: string): bool =
       inc gt
   result = result and djd == 0
 
-proc matchGlob*(path: string; glob: string; state: var GlobState) =
+template echoGlobDbg(ts: varargs[untyped]): untyped =
+  when defined(debugGlob):
+    echo ts
+  else:
+    discard
+
+func skipDepth(glob: string; gt: var int; sd: int) {.inline.} =
+  var depth = sd
+  while gt < len(glob) and depth > 0:
+    case glob[gt]
+    of '{':
+      inc depth
+    of '}':
+      dec depth
+    of '\\':
+      inc gt # escaped char is skipped at end of loop
+    else:
+      discard
+    inc gt
+
+proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   var
     pt = state.pt
     gt = state.gt
+    sd = sdr
   let pathLen =
     if (len(path) > 0) and (path[^1] == DirSep):
       len(path) - 1
@@ -73,6 +103,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       dec pt
 
   template norm(x) =
+    echoGlobDbg "norm(g==p): ", path[pt], " == ", x
     if path[pt] != x:
       state.match = NoFurtherMatch
       break
@@ -89,7 +120,9 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       else:
         state.match = NoFurtherMatch
       break
-    if pt >= pathLen and (state.match != InDisjoint and glob[gt] != '{'):
+    echoGlobDbg "glob part: ", glob[gt ..^ 1]
+    if pt >= pathLen and glob[gt] != '{' and not (sdr > 0 and glob[gt] in [',', '}']):
+      echoGlobDbg "path end: ", glob[gt ..^ 1], " : ", state.match
       state.match = NoMatch
       var onSep = glob[gt] == '/'
       if onSep:
@@ -105,18 +138,25 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       elif gt == glob.len:
         state.match = Match
       break
+    echoGlobDbg "path part: ", path[pt ..^ 1]
     case glob[gt]
     of '*':
       if gt + 1 < glob.len and glob[gt + 1] == '*': # **
-        if gt + 2 >= glob.len: # glob ends with **
+        echoGlobDbg "starstar"
+        inc gt, 2
+        skipDepth(glob, gt, sdr)
+
+        if gt >= glob.len: # glob ends with **
           state.match = AllFurtherMatch
           break
         else:
+          # XXX: '**.txt' for example is not supported can ensure **/ here for safety
+          inc gt # this gets rid of '/'
           var flag = true
           while flag:
-            # XXX: '**.txt' for example is not supported can ensure **/ here for safety
-            var gs = GlobState(gt: gt + 3, pt: pt, match: state.match)
-            matchGlob(path, glob, gs)
+            var gs = GlobState(gt: gt, pt: pt, match: state.match)
+            matchGlob(path, glob, gs, sdr = sd)
+            echoGlobDbg "starstar return: ", gs.match, " : ", glob[gs.gt ..^ 1]
             if gs.match >= Match:
               state = gs
               flag = false
@@ -129,6 +169,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
           break
       else: # single *
         inc gt
+        skipDepth(glob, gt, sdr)
         if gt >= glob.len:
           var flag = false
           while pt < pathLen:
@@ -146,7 +187,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
           var best = NoFurtherMatch
           while pt < pathLen and path[pt] != DirSep:
             var gs = GlobState(gt: gt, pt: pt, match: state.match)
-            matchGlob(path, glob, gs)
+            matchGlob(path, glob, gs, sdr = sd)
             if gs.match >= Match:
               state = gs
               return
@@ -217,27 +258,33 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
           inc pt
     of '{':
       inc gt
+      inc sd
       var
         gs = state
-        retc = gt
+        retc = gt # tracks the option position for resets
         retpt = pt
       while true:
-        gs = GlobState(gt: gt, pt: pt, match: InDisjoint)
-        matchGlob(path, glob, gs)
+        gs = GlobState(gt: gt, pt: pt, match: state.match)
+        matchGlob(path, glob, gs, sdr = sd)
+        echoGlobDbg "{ returned: ",
+          glob[gs.gt .. ^1], " : ", gs.match, " : ", path[gs.pt ..^ 1]
         if gs.match >= Match:
-          pt = gs.pt
-          if gs.gt == gt:
-            break
+          state.match = gs.match
+          return
 
         if retc > -1:
-          if gs.match < Match:
+          # this means the recursion ended with match in this position
+          if gs.gt < len(glob) and glob[gs.gt] in [',', '}']:
+            gt = gs.gt
+            pt = gs.pt
+          else:
+            # faild. reset the position to trigger advancing to the next one
             gt = retc
             pt = retpt
             retc = -1
-          else:
-            gt = gs.gt - 1
 
         var depth = 1
+        # we skip over inner-depths here since they are handled by recursion
         while gt < len(glob):
           case glob[gt]
           of '{':
@@ -248,12 +295,14 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
               inc gt
               break
           of '\\':
-            inc gt
+            inc gt # escaped char is skipped at end of loop
           of ',':
             if depth == 1 and retc == -1:
               retc = gt + 1
               retpt = pt
               if gs.match < Match:
+                # previous attempt didn't work, so we stop here
+                # i.e. not hunting for '}'
                 inc gt
                 break
           else:
@@ -269,17 +318,15 @@ proc matchGlob*(path: string; glob: string; state: var GlobState) =
       state.match = gs.match
       return
     of ',':
-      if state.match == InDisjoint:
-        state.match = Match
-        state.gt = gt + 1
+      if sdr > 0:
+        state.gt = gt
         state.pt = pt
         break
       else:
         norm()
     of '}':
-      if state.match == InDisjoint:
-        state.gt = gt + 1
-        state.match = Match
+      if sdr > 0:
+        state.gt = gt
         state.pt = pt
         break
       else:
@@ -300,7 +347,6 @@ proc matchGlob*(path: string; glob: string): GlobState =
 
 proc invert(k: MatchKind): MatchKind =
   case k
-  of InDisjoint: Match
   of NoFurtherMatch: AllFurtherMatch
   of NoMatch: Match
   of Match: NoMatch

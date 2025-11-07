@@ -2,15 +2,18 @@ import std/[unittest]
 import nfind/globs
 
 template testMatches(glob: string; matches: untyped) =
+  checkpoint glob
   check validateGlob(glob)
   for x in matches:
     check matchGlob(x, glob).match == Match
 
 template testMatch(glob: string; x: untyped) =
+  checkpoint glob
   check validateGlob(glob)
   check matchGlob(x, glob).match == Match
 
 template testGlob(glob: string; x: untyped; mk: MatchKind) =
+  checkpoint glob
   check validateGlob(glob)
   check matchGlob(x, glob).match == mk
 
@@ -82,6 +85,9 @@ suite "File searching":
     testGlob "**", "aa/aa/aaab", AllFurtherMatch
     testGlob "**/som/**/som/thing", "aa/som/x/a/som/thin/som/thin", NoMatch
 
+  test "starstar - tdiriter":
+    testGlob "/run/user/*/nas/**", "/run/user/100/nas/b.txt", AllFurtherMatch
+
   test "incremental **":
     var gs = @[GlobState()]
     let filters = @[GlobFilter(glob: "./handlers/**/*.lua", incl: true)]
@@ -141,6 +147,8 @@ suite "File searching":
     testMatch "{,a}{a{bcd,b{c}}}cde", "abcde"
     testGlob "{}{a{bcd,b{c}}}cde", "abcde", Match
     testMatch "{*.nim,*.nims}", "config.nims"
+    testGlob "{deps,docs}/**", "deps", AllFurtherMatch
+    testMatch "a/b/{c,**}/d", "a/b/c/c/d"
 
   test "cmplx disjoint":
     testMatches "{1,2}b{3,4}", @["1b3", "1b4", "2b3", "2b4"]
