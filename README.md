@@ -7,7 +7,7 @@ import nfind/diriter
 
 let filters =
   @[
-    GlobFilter(incl: false, glob: "*/*/**"),
+    globExcl"*/*/**",
     GlobFilter(incl: true, glob: "*.{nim,nims}", inverted: true),
   ]
 
