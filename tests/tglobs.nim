@@ -1,21 +1,28 @@
 import std/[unittest]
 import nfind/globs
 
-template testMatches(glob: string; matches: auto) =
+template testMatches(glob: static string; matches: auto) =
   checkpoint glob
-  check validateGlob(glob)
+  static:
+    validateGlobCompileTime(glob)
   for x in matches:
     check matchGlob(x, glob).match == Match
 
-template testMatch(glob: string; x: string) =
+template testMatch(glob: static string; x: string) =
   checkpoint glob
-  check validateGlob(glob)
+  static:
+    validateGlobCompileTime(glob)
   check matchGlob(x, glob).match == Match
 
-template testGlob(glob: string; x: string; mk: MatchKind) =
+template testGlob(glob: static string; x: string; mk: MatchKind) =
   checkpoint glob
-  check validateGlob(glob)
+  static:
+    validateGlobCompileTime(glob)
   check matchGlob(x, glob).match == mk
+
+template testViolation(glob: string; vio: ValidationVoilation) =
+  checkpoint glob
+  check globViolation(glob) == vio
 
 suite "File searching":
   test "test glob empty":
@@ -25,6 +32,13 @@ suite "File searching":
   test "glob empty starstar":
     let r = matchGlob("", "**")
     check r.match >= Match
+
+  test "invalid glob validation":
+    testViolation "**a", vioDoubleStarSegment
+    testViolation "a/**b", vioDoubleStarSegment
+    testViolation "a//b", vioDoubleSep
+    testViolation "{a", vioUnclosedDisjoint
+    testViolation "a/{b", vioUnclosedDisjoint
 
   test "norm":
     testMatch "b", "b"
@@ -119,11 +133,18 @@ suite "File searching":
     testMatch "qw/er/**/dsf/*", "qw/er/rty/ui/op/as/dsf/gh"
     testGlob "**/som/?/**", "aa/som/x/a/som/thing", AllFurtherMatch
     testMatch "**/*.txt", "/home/user/something.txt"
+    testMatch "*{,}", ""
+    testMatch "*{,}", "a"
+    testMatch "{,}*", ""
+    testMatch "{,}*", "abc"
+    testGlob "{,}*", "a/b", NoFurtherMatch
 
   test "expand disjoint":
     testMatch "{}", ""
     testMatch "{{}}", ""
     testMatch "{\\{}\\}", "{}"
+    testGlob "{,}", "a", NoFurtherMatch
+    testGlob "{,}", "a/b", NoFurtherMatch
     testMatch "{\\{}", "{"
     testMatch "{\\{\\}}", "{}"
     testMatch "a{}b", "ab"
@@ -136,7 +157,7 @@ suite "File searching":
     testMatches "{1,2}", ["1", "2"]
     testMatches "{1,2}b{3,4}", ["1b3", "2b4", "2b3", "2b4"]
     testMatches "\\{1,2}b{3,4}", ["{1,2}b3", "{1,2}b4"]
-    testGlob "{}", "a", NoMatch
+    testGlob "{}", "a", NoFurtherMatch
     testMatch "{a,b}", "a"
     testMatch "{a,b}", "b"
     testMatches "{a,{c,b}}", ["a", "b", "c"]
@@ -152,13 +173,17 @@ suite "File searching":
     testMatch "a/b/{c,**/d}e", "a/b/c/c/de"
     testMatch "a/b/{c/,**/d}e", "a/b/c/c/de"
     testMatch "a/b/{**/j,*/*/*}e", "a/b/c/c/de"
+    testMatch "a/b/{**/j,c/*/d}e", "a/b/c/c/de"
+    testMatch "a/b/{**/j,c/*{,{,c}}/d}e", "a/b/c/c/de"
+    discard globIncl"a/b/{**/j,c/*{/**,{/**,c}}/d}e"
+    testMatch "a/b/{**/j,c/*{/**,{/**,c}}/d}e", "a/b/c/c/de"
     testGlob "a/b/{**/j,*/d}e", "a/b/c/c/de", NoMatch
     testGlob "a/b/{**/j,**/d/**/}e", "a/b/c/c/de", NoMatch
-    testGlob "a/b/{c/,c/*}", "a/b/c/c/de", NoMatch
-    testGlob "a/b/{c/c/d,*/de}j", "a/b/c/c/de", NoMatch
-    testGlob "{*,bag}tar", "cat", NoMatch # should be noFurtherMatch
-    testGlob "{**/,bag}tar", "cat", NoMatch # should be noFurtherMatch
-    testGlob "{*\\(*you*\\)*,}", "cat", NoMatch
+    testGlob "a/b/{c/,c/*}", "a/b/c/c/de", NoFurtherMatch
+    testGlob "a/b/{c/c/d,*/de}j", "a/b/c/c/de", NoFurtherMatch
+    testGlob "{*,bag}tar", "cat", NoMatch
+    testGlob "{**/,bag}tar", "cat", NoMatch
+    testGlob "{*\\(*you*\\)*,}", "cat", NoFurtherMatch
 
   test "cmplx disjoint":
     testMatches "{1,2}b{3,4}", @["1b3", "1b4", "2b3", "2b4"]

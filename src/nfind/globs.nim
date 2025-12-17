@@ -17,7 +17,7 @@ type
     pt* = 0
     match* = NoMatch
 
-type ValidationVoilation = enum
+type ValidationVoilation* = enum
   vioNone
   vioDoubleStarSegment
   vioDoubleSep
@@ -34,34 +34,90 @@ proc violationToString(v: ValidationVoilation): string =
   of vioUnclosedDisjoint:
     "unclosed disjoint"
 
-proc validateGlob*(glob: string; gt: var int): ValidationVoilation =
-  result = vioNone
+func skipDepth(glob: string; gt: var int) {.inline.} =
+  var depth = 1
+  while gt < len(glob) and depth > 0:
+    case glob[gt]
+    of '{':
+      inc depth
+    of '}':
+      dec depth
+    of '\\':
+      inc gt # escaped char is skipped at end of loop
+    else:
+      discard
+    inc gt
+
+type
+  GlobValidation = object
+    gt = 0
+    djd = 0
+    starstar = -1
+
+iterator disjointSections(glob: string; gt: var int): int =
   var djd = 0
+  yield gt
+  inc gt
+  while gt < glob.len:
+    case glob[gt]
+    of ',':
+      if djd == 0:
+        inc gt
+        yield gt
+    of '{':
+      inc djd
+    of '}':
+      dec djd
+      if djd <= 0:
+        break
+    of '\\':
+      inc gt
+    else:
+      discard
+    inc gt
+
+proc validateGlob*(glob: string; v: var GlobValidation): ValidationVoilation =
+  result = vioNone
+  template gt: untyped = v.gt
+  template djd: untyped = v.djd
 
   while gt < glob.len:
+    if v.starstar > -1:
+      if glob[gt] notin ['{', '}', ','] and glob[gt] != '/':
+        return vioDoubleStarSegment
+    else:
+      v.starstar = -1
     case glob[gt]
     of '*':
       inc gt
       if gt < glob.len and glob[gt] == '*':
+        v.starstar = gt
         inc gt
-        var djn = djd
-        while gt < glob.len and djn > 0 and glob[gt] == '}':
-          dec djn
-          djd = max(0, djd - 1)
-          inc gt
-        if gt < glob.len and glob[gt] != '/':
-          return vioDoubleStarSegment
-        inc gt
+        return validateGlob(glob, v)
     of '{':
-      inc djd
       inc gt
+      let s = gt
+      for start in disjointSections(glob, gt):
+        var tmp = GlobValidation(gt: start, djd: djd + 1, starstar: v.starstar)
+        let trial = validateGlob(glob, tmp)
+        if trial > vioNone:
+          v.starstar = tmp.starstar
+          v.gt = tmp.gt
+          return trial
     of '}':
       djd = max(0, djd - 1)
       inc gt
+    of ',':
+      if djd > 0:
+        skipDepth(glob, gt)
+        dec djd
+      else:
+        inc gt
     of '\\':
       inc gt, 2
     of '/':
       inc gt
+      v.starstar = -1
       if gt < glob.len and glob[gt] == '/':
         return vioDoubleSep
     else:
@@ -70,8 +126,12 @@ proc validateGlob*(glob: string; gt: var int): ValidationVoilation =
     result = vioUnclosedDisjoint
 
 proc validateGlob*(glob: string): bool =
-  var col = 0
-  validateGlob(glob, col) == vioNone
+  var val = GlobValidation()
+  validateGlob(glob, val) == vioNone
+
+proc globViolation*(glob: string): ValidationVoilation =
+  var val = GlobValidation()
+  result = validateGlob(glob, val)
 
 proc globIncl*(glob: sink string): GlobFilter =
   GlobFilter(incl: true, glob: glob)
@@ -79,15 +139,19 @@ proc globIncl*(glob: sink string): GlobFilter =
 proc globExcl*(glob: sink string): GlobFilter =
   GlobFilter(incl: false, glob: glob)
 
-proc globPositionMonoFmt(glob: string; gt: int): string =
+proc globPositionMonoFmt(glob: string; v: GlobValidation): string =
   result = glob
   result &= '\n'
-  for i in 0 ..< gt:
-    result &= ' '
-  result &= '^'
+  for i in 0 ..< max(len(glob), v.gt + 1):
+    if i == v.gt:
+      result &= '^'
+    elif i == v.starstar:
+      result &= '^'
+    else:
+      result &= ' '
 
-proc validateGlobCompileTime(glob: static string) {.compileTime.} =
-  var gt = 0
+proc validateGlobCompileTime*(glob: static string) {.compileTime.} =
+  var gt = GlobValidation()
   let rt = validateGlob(glob, gt)
   if rt != vioNone:
     echo "invalid glob: " & violationToString(rt)
@@ -109,19 +173,23 @@ template echoGlobDbg(ts: varargs[untyped]): untyped =
   else:
     discard
 
-func skipDepth(glob: string; gt: var int) {.inline.} =
-  var depth = 1
-  while gt < len(glob) and depth > 0:
+func skipDepth(glob: string; gt: var int; sd: var int) {.inline, deprecated.} =
+  when defined(debugGlob):
+    let backup = gt
+  while gt < len(glob) and sd > 0:
     case glob[gt]
     of '{':
-      inc depth
+      inc sd
     of '}':
-      dec depth
+      dec sd
     of '\\':
       inc gt # escaped char is skipped at end of loop
     else:
       discard
     inc gt
+  when defined(debugGlob):
+    if gt != backup:
+      debugEcho "skipped depth: ", glob[gt .. ^1]
 
 proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   var
@@ -161,7 +229,8 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         state.match = NoFurtherMatch
       break
     echoGlobDbg "glob part: ", glob[gt ..^ 1]
-    if pt >= pathLen and glob[gt] != '{' and not (sdr > 0 and glob[gt] in [',', '}']):
+    if pt >= pathLen and
+        not (glob[gt] in ['{', '*'] or (sdr > 0 and glob[gt] in [',', '}'])):
       echoGlobDbg "path end: ", glob[gt ..^ 1], " : ", state.match
       state.match = NoMatch
       var onSep = glob[gt] == '/'
@@ -227,16 +296,23 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
           while pt < pathLen and path[pt] != DirSep:
             inc pt
         else:
-          var best = NoFurtherMatch
-          while pt < pathLen and path[pt] != DirSep:
-            var gs = GlobState(gt: gt, pt: pt, match: state.match)
+          var
+            best = NoFurtherMatch
+            startPt = pt
+          while true:
+            var gs = GlobState(gt: gt, pt: startPt, match: state.match)
             matchGlob(path, glob, gs, sdr = sd)
-            if gs.match >= Match:
+            var candidate = gs.match
+            if startPt >= pathLen and candidate == NoMatch:
+              candidate = NoFurtherMatch
+            if candidate >= Match:
               state = gs
               return
-            inc pt
-            if gs.match > best:
-              best = gs.match
+            if candidate > best:
+              best = candidate
+            if startPt >= pathLen or path[startPt] == DirSep:
+              break
+            inc startPt
           state.match = best
           break
     of '?':
@@ -306,14 +382,19 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         gs = state
         retc = gt # tracks the option position for resets
         retpt = pt
+        bestState = GlobState(match: NoFurtherMatch)
+        hasBest = false
       while true:
         gs = GlobState(gt: gt, pt: pt, match: state.match)
         matchGlob(path, glob, gs, sdr = sd)
         echoGlobDbg "{ returned: ",
           glob[gs.gt .. ^1], " : ", gs.match, " : ", path[gs.pt ..^ 1]
         if gs.match >= Match:
-          state.match = gs.match
+          state = gs
           return
+        if not hasBest or gs.match > bestState.match:
+          bestState = gs
+          hasBest = true
 
         if retc > -1:
           # this means the recursion ended with match in this position
@@ -358,7 +439,10 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
               continue
           break
 
-      state.match = gs.match
+      if hasBest:
+        state = bestState
+      else:
+        state.match = gs.match
       return
     of ',':
       if sdr > 0:
