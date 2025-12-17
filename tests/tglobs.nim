@@ -1,18 +1,18 @@
 import std/[unittest]
 import nfind/globs
 
-template testMatches(glob: string; matches: untyped) =
+template testMatches(glob: string; matches: auto) =
   checkpoint glob
   check validateGlob(glob)
   for x in matches:
     check matchGlob(x, glob).match == Match
 
-template testMatch(glob: string; x: untyped) =
+template testMatch(glob: string; x: string) =
   checkpoint glob
   check validateGlob(glob)
   check matchGlob(x, glob).match == Match
 
-template testGlob(glob: string; x: untyped; mk: MatchKind) =
+template testGlob(glob: string; x: string; mk: MatchKind) =
   checkpoint glob
   check validateGlob(glob)
   check matchGlob(x, glob).match == mk
@@ -142,13 +142,23 @@ suite "File searching":
     testMatches "{a,{c,b}}", ["a", "b", "c"]
     testMatch "{a,{,b}}d", "bd"
     testMatch "{a,h,b}{{f,}{e,d}}", "bd"
-    testMatch "{,a}{ab,bc,b}cde", "abcde"
+    testMatch "{*.nim,*.nims}", "config.nims"
     testMatch "{,a}{ab,b}cde", "abcde"
     testMatch "{,a}{a{bcd,b{c}}}cde", "abcde"
     testGlob "{}{a{bcd,b{c}}}cde", "abcde", Match
-    testMatch "{*.nim,*.nims}", "config.nims"
+    testMatch "{,a}{ab,bc,b}cde", "abcde"
     testGlob "{deps,docs}/**", "deps", AllFurtherMatch
     testMatch "a/b/{c,**}/d", "a/b/c/c/d"
+    testMatch "a/b/{c,**/d}e", "a/b/c/c/de"
+    testMatch "a/b/{c/,**/d}e", "a/b/c/c/de"
+    testMatch "a/b/{**/j,*/*/*}e", "a/b/c/c/de"
+    testGlob "a/b/{**/j,*/d}e", "a/b/c/c/de", NoMatch
+    testGlob "a/b/{**/j,**/d/**/}e", "a/b/c/c/de", NoMatch
+    testGlob "a/b/{c/,c/*}", "a/b/c/c/de", NoMatch
+    testGlob "a/b/{c/c/d,*/de}j", "a/b/c/c/de", NoMatch
+    testGlob "{*,bag}tar", "cat", NoMatch # should be noFurtherMatch
+    testGlob "{**/,bag}tar", "cat", NoMatch # should be noFurtherMatch
+    testGlob "{*\\(*you*\\)*,}", "cat", NoMatch
 
   test "cmplx disjoint":
     testMatches "{1,2}b{3,4}", @["1b3", "1b4", "2b3", "2b4"]

@@ -17,21 +17,26 @@ type
     pt* = 0
     match* = NoMatch
 
-proc globIncl*(glob: sink string): GlobFilter =
-  GlobFilter(incl: true, glob: glob)
+type ValidationVoilation = enum
+  vioNone
+  vioDoubleStarSegment
+  vioDoubleSep
+  vioUnclosedDisjoint
 
-proc globExcl*(glob: sink string): GlobFilter =
-  GlobFilter(incl: false, glob: glob)
+proc violationToString(v: ValidationVoilation): string =
+  case v
+  of vioNone:
+    "no error"
+  of vioDoubleStarSegment:
+    "double star cannot share path segment with other patterns (missing /)"
+  of vioDoubleSep:
+    "double segment delimiter"
+  of vioUnclosedDisjoint:
+    "unclosed disjoint"
 
-proc validateGlob*(glob: string): bool =
-  result = true
-  var
-    gt = 0
-    djd = 0
-  template adv() =
-    inc gt
-    if gt >= glob.len:
-      return false
+proc validateGlob*(glob: string; gt: var int): ValidationVoilation =
+  result = vioNone
+  var djd = 0
 
   while gt < glob.len:
     case glob[gt]
@@ -45,7 +50,7 @@ proc validateGlob*(glob: string): bool =
           djd = max(0, djd - 1)
           inc gt
         if gt < glob.len and glob[gt] != '/':
-          return false
+          return vioDoubleStarSegment
         inc gt
     of '{':
       inc djd
@@ -58,19 +63,54 @@ proc validateGlob*(glob: string): bool =
     of '/':
       inc gt
       if gt < glob.len and glob[gt] == '/':
-        return false
+        return vioDoubleSep
     else:
       inc gt
-  result = result and djd == 0
+  if djd != 0:
+    result = vioUnclosedDisjoint
+
+proc validateGlob*(glob: string): bool =
+  var col = 0
+  validateGlob(glob, col) == vioNone
+
+proc globIncl*(glob: sink string): GlobFilter =
+  GlobFilter(incl: true, glob: glob)
+
+proc globExcl*(glob: sink string): GlobFilter =
+  GlobFilter(incl: false, glob: glob)
+
+proc globPositionMonoFmt(glob: string; gt: int): string =
+  result = glob
+  result &= '\n'
+  for i in 0 ..< gt:
+    result &= ' '
+  result &= '^'
+
+proc validateGlobCompileTime(glob: static string) {.compileTime.} =
+  var gt = 0
+  let rt = validateGlob(glob, gt)
+  if rt != vioNone:
+    echo "invalid glob: " & violationToString(rt)
+    quit globPositionMonoFmt(glob, gt)
+
+proc globIncl*(glob: static string): GlobFilter =
+  static:
+    validateGlobCompileTime(glob)
+  GlobFilter(incl: true, glob: glob)
+
+proc globExcl*(glob: static string): GlobFilter =
+  static:
+    validateGlobCompileTime(glob)
+  GlobFilter(incl: false, glob: glob)
 
 template echoGlobDbg(ts: varargs[untyped]): untyped =
   when defined(debugGlob):
-    echo ts
+    debugEcho ts
   else:
     discard
 
-func skipDepth(glob: string; gt: var int; sd: int) {.inline.} =
-  var depth = sd
+func skipDepth(glob: string; gt: var int) {.inline.} =
+  var depth = 1
   while gt < len(glob) and depth > 0:
     case glob[gt]
     of '{':
@@ -144,12 +184,13 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
       if gt + 1 < glob.len and glob[gt + 1] == '*': # **
         echoGlobDbg "starstar"
         inc gt, 2
-        skipDepth(glob, gt, sdr)
-
         if gt >= glob.len: # glob ends with **
           state.match = AllFurtherMatch
           break
         else:
+          # this might not be /
+          if glob[gt] == '}':
+            skipDepth(glob, gt)
           # XXX: '**.txt' for example is not supported can ensure **/ here for safety
           inc gt # this gets rid of '/'
           var flag = true
@@ -168,8 +209,10 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
             state.match = NoMatch
           break
       else: # single *
+        echoGlobDbg "single star"
+        if glob[gt] == '}':
+          skipDepth(glob, gt)
         inc gt
-        skipDepth(glob, gt, sdr)
         if gt >= glob.len:
           var flag = false
           while pt < pathLen:
@@ -319,16 +362,14 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
       return
     of ',':
       if sdr > 0:
-        state.gt = gt
-        state.pt = pt
-        break
+        skipDepth(glob, gt)
+        echoGlobDbg "special ,"
       else:
         norm()
     of '}':
       if sdr > 0:
-        state.gt = gt
-        state.pt = pt
-        break
+        skipDepth(glob, gt)
+        echoGlobDbg "special }"
       else:
         norm()
     of '/':

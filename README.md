@@ -30,6 +30,25 @@ echo validateGlob("**.nim")
 The above is invalid because `**` can only match path segments.
 `**/*.nim` will work for this instead.
 
+When possible glob strings are validated at compile time:
+
+```nim
+globIncl("{a,")
+globIncl("**.txt")
+```
+
+```
+invalid glob: unclosed disjoint
+{a,
+   ^
+
+invalid glob: double star cannot share path segment with other patterns (missing /)
+**.txt
+  ^
+```
+
+
+
 
 ## why use
 * glob logic is designed to be efficient for walking directories
