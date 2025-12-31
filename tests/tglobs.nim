@@ -138,6 +138,7 @@ suite "File searching":
     testMatch "{,}*", ""
     testMatch "{,}*", "abc"
     testGlob "{,}*", "a/b", NoFurtherMatch
+    testGlob "**/*{e,f}*", "abcd", NoMatch
 
   test "expand disjoint":
     testMatch "{}", ""
@@ -165,8 +166,8 @@ suite "File searching":
     testMatch "{a,h,b}{{f,}{e,d}}", "bd"
     testMatch "{*.nim,*.nims}", "config.nims"
     testMatch "{,a}{ab,b}cde", "abcde"
-    testMatch "{,a}{a{bcd,b{c}}}cde", "abcde"
-    testGlob "{}{a{bcd,b{c}}}cde", "abcde", Match
+    testMatch "{,a}{a{bcd,b{c,}}}cde", "abcde"
+    testGlob "{}{a{bcd,b{c,}}}cde", "abcde", Match
     testMatch "{,a}{ab,bc,b}cde", "abcde"
     testGlob "{deps,docs}/**", "deps", AllFurtherMatch
     testMatch "a/b/{c,**}/d", "a/b/c/c/d"
@@ -175,7 +176,6 @@ suite "File searching":
     testMatch "a/b/{**/j,*/*/*}e", "a/b/c/c/de"
     testMatch "a/b/{**/j,c/*/d}e", "a/b/c/c/de"
     testMatch "a/b/{**/j,c/*{,{,c}}/d}e", "a/b/c/c/de"
-    discard globIncl"a/b/{**/j,c/*{/**,{/**,c}}/d}e"
     testMatch "a/b/{**/j,c/*{/**,{/**,c}}/d}e", "a/b/c/c/de"
     testGlob "a/b/{**/j,*/d}e", "a/b/c/c/de", NoMatch
     testGlob "a/b/{**/j,**/d/**/}e", "a/b/c/c/de", NoMatch
@@ -226,3 +226,7 @@ suite "File searching":
     testMatch "[a", "[a"
     testGlob "ab[c", "abc", NoFurtherMatch
     testGlob "ab[]c", "abc", NoFurtherMatch
+
+  test "case insensitivity":
+    testMatch "*.(?i)nim(?-i)", "abc.nim"
+    testMatch "*.(?i)nim(?-i)", "abc.nIm"

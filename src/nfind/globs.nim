@@ -12,10 +12,14 @@ type
     Match
     AllFurtherMatch
 
+  StateKind = enum
+    skInsensitive
+
   GlobState* = object
     gt* = 0
     pt* = 0
     match* = NoMatch
+    st: set[StateKind]
 
 type ValidationVoilation* = enum
   vioNone
@@ -48,11 +52,10 @@ func skipDepth(glob: string; gt: var int) {.inline.} =
       discard
     inc gt
 
-type
-  GlobValidation = object
-    gt = 0
-    djd = 0
-    starstar = -1
+type GlobValidation = object
+  gt = 0
+  djd = 0
+  starstar = -1
 
 iterator disjointSections(glob: string; gt: var int): int =
   var djd = 0
@@ -78,8 +81,11 @@ iterator disjointSections(glob: string; gt: var int): int =
 
 proc validateGlob*(glob: string; v: var GlobValidation): ValidationVoilation =
   result = vioNone
-  template gt: untyped = v.gt
-  template djd: untyped = v.djd
+  template gt(): untyped =
+    v.gt
+
+  template djd(): untyped =
+    v.djd
 
   while gt < glob.len:
     if v.starstar > -1:
@@ -196,6 +202,14 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
     pt = state.pt
     gt = state.gt
     sd = sdr
+    st = state.st
+
+  template comitState() =
+    if sdr == 0:
+      state.pt = pt
+      state.gt = gt
+      state.st = st
+
   let pathLen =
     if (len(path) > 0) and (path[^1] == DirSep):
       len(path) - 1
@@ -213,8 +227,9 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   template norm(x) =
     echoGlobDbg "norm(g==p): ", path[pt], " == ", x
     if path[pt] != x:
-      state.match = NoFurtherMatch
-      break
+      if skInsensitive notin st or x.toLowerAscii != path[pt].toLowerAscii:
+        state.match = NoFurtherMatch
+        break
     inc pt
     inc gt
 
@@ -230,7 +245,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
       break
     echoGlobDbg "glob part: ", glob[gt ..^ 1]
     if pt >= pathLen and
-        not (glob[gt] in ['{', '*'] or (sdr > 0 and glob[gt] in [',', '}'])):
+        glob[gt] notin ['{', '*', '('] and (sdr <= 0 or glob[gt] notin [',', '}']):
       echoGlobDbg "path end: ", glob[gt ..^ 1], " : ", state.match
       state.match = NoMatch
       var onSep = glob[gt] == '/'
@@ -386,6 +401,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         hasBest = false
       while true:
         gs = GlobState(gt: gt, pt: pt, match: state.match)
+        echoGlobDbg "{ recurse"
         matchGlob(path, glob, gs, sdr = sd)
         echoGlobDbg "{ returned: ",
           glob[gs.gt .. ^1], " : ", gs.match, " : ", path[gs.pt ..^ 1]
@@ -432,11 +448,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
           else:
             discard
           inc gt
-        if gt >= len(glob):
-          if gs.pt < pathLen or gs.match == NoMatch:
-            gs.match = NoMatch
-            if retc > -1:
-              continue
+        if depth <= 0 and retc == -1:
           break
 
       if hasBest:
@@ -456,10 +468,32 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         echoGlobDbg "special }"
       else:
         norm()
+    of '(':
+      let bu = gt
+      inc gt
+      if gt < len(glob) and glob[gt] == '?':
+        inc gt
+        if gt < len(glob):
+          var isMinus =
+            if glob[gt] == '-':
+              inc gt
+              true
+            else:
+              false
+          if gt < len(glob) and glob[gt] == 'i':
+            inc gt
+            if gt < len(glob) and glob[gt] == ')':
+              if isMinus:
+                st.excl skInsensitive
+              else:
+                st.incl skInsensitive
+              inc gt
+              continue
+      gt = bu
+      norm()
     of '/':
       norm(DirSep)
-      state.pt = pt
-      state.gt = gt
+      comitState()
     of '\\':
       gt = min(gt + 1, len(glob) - 1)
       norm()
@@ -509,3 +543,57 @@ proc includes*(path: string; filters: openArray[GlobFilter]): bool =
   let pos = findFirstGlob(path, filters)
   if pos > -1:
     result = filters[pos].incl
+
+proc nextSection(glob: string; gt: var int) =
+  var depth = 0
+  while gt < glob.len:
+    case glob[gt]
+    of '{':
+      inc depth
+    of '}':
+      if depth > 0:
+        dec depth
+    of ',':
+      if depth == 0:
+        return
+    of '\\':
+      inc gt
+      if gt >= glob.len:
+        dec gt
+    else:
+      discard
+    inc gt
+
+iterator iterExpansions*(glob: string; gts = 0; depths = 0): string {.closure.} =
+  result = ""
+  var
+    gt = gts
+    depth = depths
+  while gt < glob.len:
+    case glob[gt]
+    of '{':
+      while gt < glob.len and glob[gt] != '}':
+        inc gt
+        for np in iterExpansions(glob, gts = gt, depths = depth + 1):
+          yield result & np
+        nextSection(glob, gt)
+      return
+    of '}':
+      if depth > 0:
+        dec depth
+      else:
+        result.add glob[gt]
+    of ',':
+      if depth > 0:
+        skipDepth(glob, gt)
+        continue
+      else:
+        result.add glob[gt]
+    of '\\':
+      inc gt
+      if gt >= glob.len:
+        dec gt
+    else:
+      result.add glob[gt]
+    inc gt
+  yield result

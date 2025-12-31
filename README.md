@@ -15,14 +15,39 @@ for path in find(".", {fsoFile}, filters):
   echo path
 ```
 
-lists every file in pwd that does not have a nim extension. Filters evaluate
-in order. Globs must always be relative to the seach path for simplicity.
+lists every file in pwd that does not have a nim extension.
+Convoluted for demonstration purposes (first filter excludes sub-dirs, second uses inverted dijoint).
+Filters evaluate in order. Globs must always be relative to the seach path for simplicity.
+
+The glob rules are from VSCode's approach.
+
+short synopsis:
+
+> globs sperate path segments with a / character on all platforms
+> 
+> '*'  matches 0 or more characters in a single segment
+>
+> '**' matches 0 or more segments
+> 
+> '?'  matches a single character
+> 
+> '{}' is an "or"-like expansion with choices seperated by a comma
+>
+> '[]' specifies a range of characters and may start with '[!' to negate
+>
+> '\'  is the escape character - this also means all glob paths use / as dir separator regardless of OS
+>
+> * case insensitive sections are supported with `(?i)blahblah(?-i)`
+> * all patterns are nestable within `{}`
+
+
+Test for inclusion on arbitrary string:
 
 ```nim
-echo includes("./file.nims", [GlobFilter(incl: true, glob: "{*.nim,*.nims}")])
+echo includes("./file.nims", [globIncl"{*.nim,*.nims}"])
 ```
 
-Invalid globs will typically bail-out to literal comparisons, however some globs are not valid. Test if a glob is valid:
+Invalid globs will typically bail-out to literal comparisons, however some globs are truely not valid. Test if a glob is valid:
 
 ```nim
 echo validateGlob("**.nim")
@@ -30,7 +55,7 @@ echo validateGlob("**.nim")
 The above is invalid because `**` can only match path segments.
 `**/*.nim` will work for this instead.
 
-When possible glob strings are validated at compile time:
+When possible, glob strings are validated at compile time:
 
 ```nim
 globIncl("{a,")
@@ -47,12 +72,27 @@ invalid glob: double star cannot share path segment with other patterns (missing
   ^
 ```
 
+Expand disjoints:
 
+```nim
+for expanded in iterExpansions("{,{a,b}}{1,2}"):
+  echo expanded
+discard """
+  1
+  2
+  a1
+  a2
+  b1
+  b2
+"""
+```
+
+This is less of a glob feature and more of an aux feature for configuration files etc.
 
 
 ## why use
 * glob logic is designed to be efficient for walking directories
-    - `GlobState` objects track progress of each pattern as the path gains depth
+    - `GlobState` objects track progress of each pattern as the path gains depth to avoid re-evaluating sections
 * hand rolled - no regex, no non-`std` dependencies
 * fairly robust features (eg. nested expressions in groups)
     - see second help menu below for details [or this](https://code.visualstudio.com/docs/editor/glob-patterns) as of writing
@@ -66,7 +106,7 @@ invalid glob: double star cannot share path segment with other patterns (missing
 ## nfind program
 
 With the library is an implementation of a find utility. I made it because I always forget the
-syntax for unix find. It's a simple example of how to use the library. Below are the help menus
+syntax for unix find. It's a simple example of how to use the library. Below are some help menus
 from the program.
 
 build with:
@@ -90,22 +130,6 @@ syntax:
 - use '--e!' and '--i!' for inverted filters
 
 version: 1
-```
-
-```
-the glob rules are from VSCode's documentation, so you can look that up to maybe get a better explination.
-below is a short synopsis:
-globs sperate path segments with a / character on all platforms
-'*'  matches 0 or more characters in a single segment
-'**' matches 0 or more segments
-'?'  matches a single character
-'{}' is an "or"-like expansion with choices seperated by a comma
-'[]' specifies a range of characters and may start with '[!' to negate
-'\'  is the escape character - this also means all glob paths use / as dir separator regardless of OS
-
-- you may want to wrap glob patterns in "" since some shells like to expand them on their own
-- the order which globs are specified matters as a match immediately terminates the glob filtering stage
-  - '-e:"**" -i:"**/*.txt"' will always exclude everything since the catch-all happens first
 ```
 
 this idea could use some work, but meh:

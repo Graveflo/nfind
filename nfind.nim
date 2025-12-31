@@ -101,6 +101,7 @@ proc main(): int =
   - you may want to wrap glob patterns in "" since some shells like to expand them on their own
   - the order which globs are specified matters as a match immediately terminates the glob filtering stage
     - '-e:"**" -i:"**/*.txt"' will always exclude everything since the catch-all happens first
+  - case insensitive sections are supported with `(?i)blahblah(?-i)`
   """
   let execHelp =
     &d"""
