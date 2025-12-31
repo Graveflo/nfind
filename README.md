@@ -35,7 +35,7 @@ short synopsis:
 >
 > '[]' specifies a range of characters and may start with '[!' to negate
 >
-> '\'  is the escape character - this also means all glob paths use / as dir separator regardless of OS
+> '\\'  is the escape character - this also means all glob paths use / as dir separator regardless of OS
 >
 > * case insensitive sections are supported with `(?i)blahblah(?-i)`
 > * all patterns are nestable within `{}`
