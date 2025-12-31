@@ -102,7 +102,6 @@ proc validateGlob*(glob: string; v: var GlobValidation): ValidationVoilation =
         return validateGlob(glob, v)
     of '{':
       inc gt
-      let s = gt
       for start in disjointSections(glob, gt):
         var tmp = GlobValidation(gt: start, djd: djd + 1, starstar: v.starstar)
         let trial = validateGlob(glob, tmp)
@@ -137,7 +136,7 @@ proc validateGlob*(glob: string): bool =
 
 proc globViolation*(glob: string): ValidationVoilation =
   var val = GlobValidation()
-  result = validateGlob(glob, val)
+  validateGlob(glob, val)
 
 proc globIncl*(glob: sink string): GlobFilter =
   GlobFilter(incl: true, glob: glob)
@@ -178,24 +177,6 @@ template echoGlobDbg(ts: varargs[untyped]): untyped =
     debugEcho ts
   else:
     discard
-
-func skipDepth(glob: string; gt: var int; sd: var int) {.inline, deprecated.} =
-  when defined(debugGlob):
-    let backup = gt
-  while gt < len(glob) and sd > 0:
-    case glob[gt]
-    of '{':
-      inc sd
-    of '}':
-      dec sd
-    of '\\':
-      inc gt # escaped char is skipped at end of loop
-    else:
-      discard
-    inc gt
-  when defined(debugGlob):
-    if gt != backup:
-      debugEcho "skipped depth: ", glob[gt .. ^1]
 
 proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   var
