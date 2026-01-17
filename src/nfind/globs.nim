@@ -225,8 +225,8 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         state.match = NoFurtherMatch
       break
     echoGlobDbg "glob part: ", glob[gt ..^ 1]
-    if pt >= pathLen and
-        glob[gt] notin ['{', '*', '('] and (sdr <= 0 or glob[gt] notin [',', '}']):
+    if pt >= pathLen and glob[gt] notin ['{', '*', '('] and
+        (sdr <= 0 or glob[gt] notin [',', '}']):
       echoGlobDbg "path end: ", glob[gt ..^ 1], " : ", state.match
       state.match = NoMatch
       var onSep = glob[gt] == '/'
@@ -264,8 +264,8 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
             matchGlob(path, glob, gs, sdr = sd)
             echoGlobDbg "starstar return: ", gs.match, " : ", glob[gs.gt ..^ 1]
             if gs.match >= Match:
-              state = gs
-              flag = false
+              state.match = gs.match
+              return
             else:
               pt = path.find(DirSep, start = pt, last = pathLen) + 1
               if pt < 1:
@@ -302,7 +302,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
             if startPt >= pathLen and candidate == NoMatch:
               candidate = NoFurtherMatch
             if candidate >= Match:
-              state = gs
+              state.match = gs.match
               return
             if candidate > best:
               best = candidate
