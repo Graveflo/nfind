@@ -6,11 +6,11 @@ type
     inverted* = false
     glob*: string
 
-  MatchKind* = enum
-    NoFurtherMatch
-    NoMatch
-    Match
-    AllFurtherMatch
+  # this approach keeps GlobState small for performance
+  StateFlags* = enum
+    sfMatch
+    sfSoft # path additions may change result
+    sfCaseInsensitive
 
   StateKind = enum
     skInsensitive
@@ -18,8 +18,10 @@ type
   GlobState* = object
     gt* = 0
     pt* = 0
-    match* = NoMatch
-    st: set[StateKind]
+    match* = {sfSoft}
+
+template `+=`(a, b: set): untyped =
+  a = a + b
 
 type ValidationVoilation* = enum
   vioNone
@@ -178,18 +180,21 @@ template echoGlobDbg(ts: varargs[untyped]): untyped =
   else:
     discard
 
-proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
+proc matchGlob*(
+    path: string; glob: string; state: var GlobState; sdr = 0
+) {.raises: [].} =
   var
     pt = state.pt
     gt = state.gt
     sd = sdr
-    st = state.st
 
   template comitState() =
     if sdr == 0:
       state.pt = pt
       state.gt = gt
-      state.st = st
+
+  template st(): untyped =
+    state.st
 
   let pathLen =
     if (len(path) > 0) and (path[^1] == DirSep):
@@ -208,8 +213,8 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   template norm(x) =
     echoGlobDbg "norm(g==p): ", path[pt], " == ", x
     if path[pt] != x:
-      if skInsensitive notin st or x.toLowerAscii != path[pt].toLowerAscii:
-        state.match = NoFurtherMatch
+      if sfCaseInsensitive notin state.match or x.toLowerAscii != path[pt].toLowerAscii:
+        state.match = {}
         break
     inc pt
     inc gt
@@ -220,100 +225,98 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
   while true:
     if gt >= glob.len:
       if pt >= pathLen:
-        state.match = Match
+        state.match += {sfMatch, sfSoft}
       else:
-        state.match = NoFurtherMatch
+        state.match = {}
       break
     echoGlobDbg "glob part: ", glob[gt ..^ 1]
-    if pt >= pathLen and glob[gt] notin ['{', '*', '('] and
-        (sdr <= 0 or glob[gt] notin [',', '}']):
+    if pt >= pathLen and glob[gt] notin {'{', '*', '('} and
+        (sdr <= 0 or glob[gt] notin {',', '}'}):
       echoGlobDbg "path end: ", glob[gt ..^ 1], " : ", state.match
-      state.match = NoMatch
-      var onSep = glob[gt] == '/'
+      state.match = {sfSoft}
+      let onSep = glob[gt] == '/'
       if onSep:
         inc gt
       if gt + 2 == glob.len:
         if glob[gt] == '*' and glob[gt + 1] == '*':
-          state.match = AllFurtherMatch
+          state.match = {sfMatch}
         elif glob[gt] == '{' and glob[gt + 1] == '}':
-          state.match = Match
+          state.match.incl sfMatch
       elif gt + 1 == glob.len and not onSep:
         if glob[gt] == '*':
-          state.match = Match
+          state.match.incl sfMatch
       elif gt == glob.len:
-        state.match = Match
+        state.match.incl sfMatch
       break
     echoGlobDbg "path part: ", path[pt ..^ 1]
     case glob[gt]
+    of '/':
+      norm(DirSep)
+      comitState()
     of '*':
-      if gt + 1 < glob.len and glob[gt + 1] == '*': # **
+      inc gt
+      # single * (special cases)
+      while gt < glob.len and glob[gt] == '}' and sd > 0:
+        inc gt
+        dec sd
+      if gt >= glob.len:
+        while pt < pathLen:
+          if path[pt] == DirSep:
+            state.match = {}
+            break
+          inc pt
+      elif glob[gt] == '/':
+        while pt < pathLen and path[pt] != DirSep:
+          inc pt
+      elif glob[gt] == '*': # **
         echoGlobDbg "starstar"
-        inc gt, 2
-        if gt >= glob.len: # glob ends with **
-          state.match = AllFurtherMatch
-          break
-        else:
-          # this might not be /
-          if glob[gt] == '}':
-            skipDepth(glob, gt)
-          # XXX: '**.txt' for example is not supported can ensure **/ here for safety
-          inc gt # this gets rid of '/'
-          var flag = true
-          while flag:
-            var gs = GlobState(gt: gt, pt: pt, match: state.match)
-            matchGlob(path, glob, gs, sdr = sd)
-            echoGlobDbg "starstar return: ", gs.match, " : ", glob[gs.gt ..^ 1]
-            if gs.match >= Match:
-              state.match = gs.match
-              return
-            else:
-              pt = path.find(DirSep, start = pt, last = pathLen) + 1
-              if pt < 1:
-                break
-          if flag:
-            state.match = NoMatch
-          break
+        while true:
+          inc gt
+          if gt >= glob.len: # glob ends with **
+            state.match = {sfMatch}
+            return
+          elif glob[gt] == '}' and sd > 0:
+            dec sd
+          else:
+            break
+        # XXX: '**.txt' for example is not supported can ensure **/ here for safety
+        inc gt # this gets rid of '/'
+        while true:
+          var gs = GlobState(gt: gt, pt: pt, match: state.match)
+          matchGlob(path, glob, gs, sdr = sd)
+          echoGlobDbg "starstar return: ", gs.match, " : ", glob[gs.gt ..^ 1]
+          if sfMatch in gs.match:
+            state.match = gs.match
+            return
+          else:
+            pt = path.find(DirSep, start = pt, last = pathLen) + 1
+            if pt < 1:
+              break
+        state.match = {sfSoft}
+        break
       else: # single *
         echoGlobDbg "single star"
-        if glob[gt] == '}':
-          skipDepth(glob, gt)
-        inc gt
-        if gt >= glob.len:
-          var flag = false
-          while pt < pathLen:
-            if path[pt] == DirSep:
-              flag = true
-              state.match = NoFurtherMatch
-              break
-            inc pt
-          if flag:
+        var
+          best: set[StateFlags] = {}
+          startPt = pt
+        while true:
+          var gs = GlobState(gt: gt, pt: startPt, match: state.match)
+          matchGlob(path, glob, gs, sdr = sd)
+          if sfMatch in gs.match:
+            state.match = gs.match
+            return
+          if sfSoft in gs.match:
+            best.incl sfSoft
+          if startPt >= pathLen or path[startPt] == DirSep:
             break
-        elif glob[gt] == '/':
-          while pt < pathLen and path[pt] != DirSep:
-            inc pt
-        else:
-          var
-            best = NoFurtherMatch
-            startPt = pt
-          while true:
-            var gs = GlobState(gt: gt, pt: startPt, match: state.match)
-            matchGlob(path, glob, gs, sdr = sd)
-            var candidate = gs.match
-            if startPt >= pathLen and candidate == NoMatch:
-              candidate = NoFurtherMatch
-            if candidate >= Match:
-              state.match = gs.match
-              return
-            if candidate > best:
-              best = candidate
-            if startPt >= pathLen or path[startPt] == DirSep:
-              break
-            inc startPt
-          state.match = best
-          break
+          inc startPt
+        if startPt >= pathLen:
+          best = {}
+        state.match = best
+        break
     of '?':
       if path[pt] == DirSep:
-        state.match = NoFurtherMatch
+        state.match = {}
         break
       inc pt
       inc gt
@@ -366,7 +369,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
           gt = rest
           norm()
         elif matches == inverted:
-          state.match = NoFurtherMatch
+          state.match = {}
           break
         else:
           inc gt
@@ -378,7 +381,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         gs = state
         retc = gt # tracks the option position for resets
         retpt = pt
-        bestState = GlobState(match: NoFurtherMatch)
+        bestState = GlobState(match: {})
         hasBest = false
       while true:
         gs = GlobState(gt: gt, pt: pt, match: state.match)
@@ -386,7 +389,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         matchGlob(path, glob, gs, sdr = sd)
         echoGlobDbg "{ returned: ",
           glob[gs.gt .. ^1], " : ", gs.match, " : ", path[gs.pt ..^ 1]
-        if gs.match >= Match:
+        if sfMatch in gs.match:
           state = gs
           return
         if not hasBest or gs.match > bestState.match:
@@ -421,7 +424,7 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
             if depth == 1 and retc == -1:
               retc = gt + 1
               retpt = pt
-              if gs.match < Match:
+              if sfMatch notin gs.match:
                 # previous attempt didn't work, so we stop here
                 # i.e. not hunting for '}'
                 inc gt
@@ -445,7 +448,8 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
         norm()
     of '}':
       if sdr > 0:
-        skipDepth(glob, gt)
+        inc gt
+        dec sd
         echoGlobDbg "special }"
       else:
         norm()
@@ -465,16 +469,13 @@ proc matchGlob*(path: string; glob: string; state: var GlobState; sdr = 0) =
             inc gt
             if gt < len(glob) and glob[gt] == ')':
               if isMinus:
-                st.excl skInsensitive
+                state.match.excl sfCaseInsensitive
               else:
-                st.incl skInsensitive
+                state.match.incl sfCaseInsensitive
               inc gt
               continue
       gt = bu
       norm()
-    of '/':
-      norm(DirSep)
-      comitState()
     of '\\':
       gt = min(gt + 1, len(glob) - 1)
       norm()
@@ -485,37 +486,34 @@ proc matchGlob*(path: string; glob: string): GlobState =
   result = GlobState()
   matchGlob(path, glob, result)
 
-proc invert(k: MatchKind): MatchKind =
-  case k
-  of NoFurtherMatch: AllFurtherMatch
-  of NoMatch: Match
-  of Match: NoMatch
-  of AllFurtherMatch: NoFurtherMatch
+proc invert(k: var set[StateFlags]) =
+  # k = k xor {sfMatch}
+  if sfMatch in k:
+    k.excl sfMatch
+  else:
+    k.incl sfMatch
 
 proc findFirstGlob*(
     path: string; filters: openArray[GlobFilter]; states: var openArray[GlobState]
 ): int =
   result = -1
   for i in 0 ..< states.len:
-    case states[i].match
-    of NoFurtherMatch:
-      continue
-    of AllFurtherMatch:
-      result = i
-      break
-    else:
+    if sfSoft in states[i].match:
       matchGlob(path, filters[i].glob, states[i])
       if filters[i].inverted:
-        states[i].match = invert(states[i].match)
-      if states[i].match >= Match:
+        invert(states[i].match)
+      if sfMatch in states[i].match:
         result = i
         break
+    elif sfMatch in states[i].match:
+      result = i
+      break
 
 proc findFirstGlob*(path: string; filters: openArray[GlobFilter]): int =
   for i in 0 ..< filters.len:
     var state = GlobState()
     matchGlob(path, filters[i].glob, state)
-    if state.match >= Match:
+    if sfMatch in state.match:
       return i
   return -1
 

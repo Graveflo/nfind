@@ -161,7 +161,7 @@ iterator find*(
         wgs[0 ..< len(wgs)] = dirc[^1][1]
         var fso = next(dirc[^1][0])
         if fso == nil:
-          let pack = dirc.pop()
+          var pack = dirc.pop()
           close(pack[0])
           if dirc.len <= 0:
             break
@@ -174,9 +174,10 @@ iterator find*(
         else:
           let thisName = fso.name
           if thisName notin skips:
-            let thisPath = working & DirSep & thisName
-            let fidx = findFirstGlob(thisPath, filters, wgs)
-            let tftype = entryKind(dirc[^1][0], fso)
+            let
+              thisPath = working & DirSep & thisName
+              fidx = findFirstGlob(thisPath, filters, wgs)
+              tftype = entryKind(dirc[^1][0], fso)
             var recurse = tftype == fsoDir
             if fidx > -1:
               if filters[fidx].incl:
@@ -187,9 +188,11 @@ iterator find*(
                 var flag = true
                 for i in 0 ..< fidx:
                   if filters[i].incl:
-                    flag = false
-                    break
-                if flag and wgs[fidx].match == AllFurtherMatch:
+                    # only includes that may still match deeper paths should block pruning
+                    if wgs[i].match != {}:
+                      flag = false
+                      break
+                if flag and wgs[fidx].match == {sfMatch}:
                   recurse = false
             if recurse:
               let newd = openDirIter(thisPath)
@@ -197,5 +200,5 @@ iterator find*(
                 dirc.add (newd, wgs)
                 working = thisPath
   finally:
-    for pack in dirc:
+    for pack in dirc.mitems:
       close(pack[0])

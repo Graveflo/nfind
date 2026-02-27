@@ -1,6 +1,36 @@
 import std/[unittest]
 import nfind/globs
 
+type MatchKind = enum
+  NoFurtherMatch
+  NoMatch
+  Match
+  AllFurtherMatch
+
+proc `==`(a: set[StateFlags]; b: MatchKind): bool =
+  let aa = a - {sfCaseInsensitive}
+  case b
+  of NoFurtherMatch:
+    aa == {}
+  of NoMatch:
+    aa == {sfSoft}
+  of Match:
+    aa == {sfSoft, sfMatch}
+  of AllFurtherMatch:
+    aa == {sfMatch}
+
+proc `<=`(b: MatchKind; a: set[StateFlags]): bool =
+  let aa = a - {sfCaseInsensitive}
+  case b
+  of NoFurtherMatch:
+    true
+  of NoMatch:
+    sfMatch in aa or sfSoft in aa
+  of Match:
+    sfMatch in aa
+  of AllFurtherMatch:
+    aa == {sfMatch}
+
 template testMatches(glob: static string; matches: auto) =
   checkpoint glob
   static:
@@ -62,6 +92,10 @@ suite "File searching":
     testMatch "*b", "b"
     testMatch "b*", "bf"
     testMatch "*", "vbf"
+    testMatch "a/*", "a/b"
+    
+    # this specific response is key to performance
+    testGlob "*", "a/b", NoFurtherMatch
 
     testGlob "b*", "hfb", NoFurtherMatch
     testGlob "a/*/*/c", "a/b/c", NoMatch
@@ -98,6 +132,7 @@ suite "File searching":
     testGlob "**", "aa/aa", AllFurtherMatch
     testGlob "**", "aa/aa/aaab", AllFurtherMatch
     testGlob "**/som/**/som/thing", "aa/som/x/a/som/thin/som/thin", NoMatch
+    testGlob "a/b/c/**", "a/b/c", AllFurtherMatch
 
   test "starstar - tdiriter":
     testGlob "/run/user/*/nas/**", "/run/user/100/nas/b.txt", AllFurtherMatch
@@ -171,6 +206,7 @@ suite "File searching":
     testMatch "{,a}{ab,bc,b}cde", "abcde"
     testGlob "{deps,docs}/**", "deps", AllFurtherMatch
     testMatch "a/b/{c,**}/d", "a/b/c/c/d"
+    testMatch "a/b/{{c,**}}/d", "a/b/c/c/d"
     testMatch "a/b/{c,**/d}e", "a/b/c/c/de"
     testMatch "a/b/{c/,**/d}e", "a/b/c/c/de"
     testMatch "a/b/{**/j,*/*/*}e", "a/b/c/c/de"
@@ -181,7 +217,7 @@ suite "File searching":
     testGlob "a/b/{**/j,**/d/**/}e", "a/b/c/c/de", NoMatch
     testGlob "a/b/{c/,c/*}", "a/b/c/c/de", NoFurtherMatch
     testGlob "a/b/{c/c/d,*/de}j", "a/b/c/c/de", NoFurtherMatch
-    testGlob "{*,bag}tar", "cat", NoMatch
+    testGlob "{*,bag}tar", "cat", NoFurtherMatch
     testGlob "{**/,bag}tar", "cat", NoMatch
     testGlob "{*\\(*you*\\)*,}", "cat", NoFurtherMatch
 
@@ -230,3 +266,6 @@ suite "File searching":
   test "case insensitivity":
     testMatch "*.(?i)nim(?-i)", "abc.nim"
     testMatch "*.(?i)nim(?-i)", "abc.nIm"
+
+  test "inverted":
+    check not includes("a/a.b", [GlobFilter(inverted: true, glob: "**/*.*")])
