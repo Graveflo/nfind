@@ -155,6 +155,8 @@ iterator find*(
     wgs.add GlobState(pt: len(working))
   # absolute path so there is no nonsense from the os APIs
   var dirc = @[(openDirIter(path.absolutePath), wgs)]
+  if not isValid(dirc[0][0]):
+    raiseOsError(osLastError())
   try:
     if isValid(dirc[^1][0]):
       while true:
